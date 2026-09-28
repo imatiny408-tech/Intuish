@@ -1281,7 +1281,7 @@ function pickPhoto(onDone){
 const SET_PAGES = [
   ["profile", "Profile", "Name and photo"],
   ["photos", "Subject photos", "Change the picture for each subject"],
-  ["account", "Account", "Email sign-up"],
+  ["account", "Account", AUTH ? "Email sign-up" : "Email sign-in coming soon"],
   ["fonts", "Fonts", "Choose the font for each part of the app"],
   ["notes", "Notes", "Your notes from the last 30 days"],
   ["install", "Get the app", "Put Intuish on your home screen or desktop"],
@@ -1299,9 +1299,10 @@ function openSettings(page){
     photos: `      <p class="set-p">Tap a subject to choose your own photo for it.</p>
       <div class="sp-grid">${mySubjects().map(sb => `<div class="sp-item"><button class="sp-pick" data-sp="${sb.id}" aria-label="Change ${esc(sb.name)} photo"><span class="sp-art">${artFor(sb)}</span><span class="sp-cam" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span></button><div class="sp-name"><b>${esc(sb.name)}</b>${D.photos && D.photos[sb.id] ? `<button class="linkish" data-sp-reset="${sb.id}">Use original</button>` : ""}</div></div>`).join("")}</div>`,
     account: `      ${signed ? `<p class="set-p">Signed in as <b>${esc(pr.email)}</b></p><div><button class="btn outline" id="signOut">Sign out</button></div>`
+      : !AUTH ? `<p class="set-p"><b>Email sign-in isn’t working yet.</b> It’s coming in a future update. Your progress, notes and photos are saved on this device until then.</p>`
       : `<p class="set-p">Sign up with your email. We’ll send a link to verify it, no password needed.</p>
         <form id="signForm" class="set-inline"><input id="signEmail" type="email" required placeholder="you@example.com" value="${esc(pr.email)}" autocomplete="email"><button class="btn" type="submit">Send link</button></form>
-        <p class="set-note" id="signNote">${AUTH ? "" : "Email sign-in is coming soon. Your progress is saved on this device in the meantime."}</p>`}`,
+        <p class="set-note" id="signNote"></p>`}`,
     fonts: page === "fonts" ? fontsPage() : "",
     install: page === "install" ? installPage() : "",
     data: `      <div class="set-row"><button class="btn outline" id="setNotes">Notes</button><button class="btn outline" id="setReset">Erase all my progress</button></div>
@@ -1619,7 +1620,7 @@ $("#notes").addEventListener("click", noteClicks);
 $("#avatarBtn").onclick = e => {
   e.stopPropagation();
   const signed = !!(D.profile.session && D.profile.email);
-  menu($("#avatarBtn"), [["settings","Settings"],["notes","Notes", D.notes.length ? String(D.notes.length) : ""], !signed && ["signup","Sign up with email"], "hr", ["about","About Intuish"]].filter(Boolean), a => {
+  menu($("#avatarBtn"), [["settings","Settings"],["notes","Notes", D.notes.length ? String(D.notes.length) : ""], !signed && AUTH && ["signup","Sign up with email"], "hr", ["about","About Intuish"]].filter(Boolean), a => {
     if(a === "settings" || a === "signup") openSettings();
     if(a === "notes") openNotes();
     if(a === "about") sheet(`<div class="sheet-head"><div><div class="eyebrow">Intuish</div><h2>Test version</h2></div><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
