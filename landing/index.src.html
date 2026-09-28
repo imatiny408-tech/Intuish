@@ -1,0 +1,492 @@
+<title>Intuish</title>
+<meta name="description" content="Intuish turns any YouTube lesson, PDF or link into practice questions and spaced review, so what you learn actually sticks.">
+<link rel="icon" href="__ICON__">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --blue:#0C68DA; --sky:#4FB3F6; --sky-2:#3BBDFE; --sun:#F8E08A; --coral:#EE8E82;
+  --ink:#16191F; --ink-2:#4A5260; --muted:#7C8594; --line:#E6EAF0;
+  --bg:#FFFFFF; --pale:#F3F6FB; --pale-2:#EAF0F8;
+  --sans:"Plus Jakarta Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --glow:conic-gradient(from 200deg,rgba(59,189,254,.6),rgba(12,104,218,.38),rgba(160,222,255,.7),rgba(59,189,254,.6));
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+h1,h2,h3{margin:0;font-weight:500;letter-spacing:-.03em;text-wrap:balance}
+p{margin:0}
+.wrap{max-width:1240px;margin:0 auto;padding-inline:24px}
+:focus-visible{outline:2px solid var(--blue);outline-offset:3px;border-radius:8px}
+
+/* Nav */
+.nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;background:rgba(255,255,255,.86);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.nav .wrap{display:flex;align-items:center;gap:34px;height:76px}
+.brand{display:flex;align-items:center;gap:11px;text-decoration:none;font-size:25px;font-weight:600;letter-spacing:-.03em;color:var(--blue)}
+.brand img{width:36px;height:36px;border-radius:10px}
+.links{display:flex;gap:30px;margin-left:auto;font-size:16px;font-weight:500}
+.links a{text-decoration:none;padding-block:4px;border-bottom:2px solid transparent}
+.links a:hover,.links a.on{border-color:var(--ink)}
+.get{font-size:16px;font-weight:600;text-decoration:none}
+.get:hover{color:var(--blue)}
+@media (max-width:860px){.links{display:none}.get{margin-left:auto}}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:10px;height:58px;padding:0 34px;border-radius:999px;background:var(--ink);color:#fff;font-size:17px;font-weight:600;text-decoration:none;transition:transform .2s,box-shadow .2s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 12px 30px -10px rgba(12,104,218,.55)}
+
+/* Hero */
+.hero{padding-block:70px 40px;text-align:center}
+.hero h1{font-size:clamp(48px,7.6vw,104px);line-height:1.02;font-weight:500;letter-spacing:-.045em;color:var(--blue)}
+.hero h1 mark{color:inherit;background:linear-gradient(transparent 8%,#E8F1FD 8%,#E8F1FD 96%,transparent 96%);padding-inline:.08em;border-radius:6px}
+.hero .lede{margin:26px auto 0;max-width:30em;font-size:clamp(18px,1.8vw,22px);color:var(--ink-2)}
+.hero-act{margin-top:34px;display:flex;justify-content:center;align-items:center;gap:26px;flex-wrap:wrap}
+.about{display:inline-flex;align-items:center;gap:10px;font-size:18px;font-weight:500;text-decoration:none;color:var(--ink)}
+.about svg{color:var(--blue)}
+.about:hover{color:var(--blue)}
+.trio{margin-top:64px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:26px;text-align:left}
+.tcard{position:relative;display:flex;flex-direction:column;border-radius:30px;background:#F2F5FB;overflow:hidden;text-decoration:none;color:var(--ink);transition:transform .25s,box-shadow .25s}
+.tcard:hover{transform:translateY(-4px);box-shadow:0 26px 50px -30px rgba(12,104,218,.45)}
+.th{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:26px 26px 18px}
+.th h2{font-size:clamp(20px,1.9vw,26px);font-weight:600;letter-spacing:-.02em;line-height:1.2}
+.th svg{flex:none;color:var(--blue);transition:transform .25s}
+.tcard:hover .th svg{transform:translateX(4px)}
+.tcard img{-webkit-mask-image:linear-gradient(to bottom,transparent,#000 7%);mask-image:linear-gradient(to bottom,transparent,#000 7%);display:block;width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;object-position:50% 70%;margin-top:auto}
+@media (max-width:900px){.trio{grid-template-columns:1fr;max-width:520px;margin-inline:auto}}
+
+/* Lightbulb card (closing section): one light source from the top, over faint graph paper */
+.hero-card{position:relative;border-radius:36px;overflow:hidden;text-align:center;isolation:isolate;
+  background:
+    radial-gradient(14% 22% at 50% 0%,rgba(255,255,255,.95),transparent 100%),
+    radial-gradient(38% 62% at 50% 0%,rgba(59,189,254,.55),transparent 100%),
+    radial-gradient(70% 95% at 50% 0%,rgba(12,104,218,.14),transparent 100%),
+    var(--pale)}
+.hero-card::before{content:"";position:absolute;inset:0;z-index:-1;
+  background-image:radial-gradient(rgba(12,104,218,.22) 1.2px,transparent 1.4px);background-size:22px 22px;
+  -webkit-mask-image:radial-gradient(60% 80% at 50% 0%,#000,transparent 100%);mask-image:radial-gradient(60% 80% at 50% 0%,#000,transparent 100%)}
+.hero-card::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(to bottom,rgba(255,255,255,0) 45%,rgba(255,255,255,.7) 80%,#fff 100%)}
+
+/* iPad mockup */
+.device{position:relative;margin:64px auto 0;max-width:980px;aspect-ratio:4/2.2;border-radius:34px 34px 0 0;padding:16px 16px 0;background:#fff;box-shadow:0 0 0 1px var(--line),0 -10px 60px -20px rgba(12,104,218,.35);text-align:left}
+.device::after{content:"";position:absolute;left:0;right:0;bottom:0;height:22%;background:linear-gradient(to bottom,rgba(255,255,255,0),#fff);pointer-events:none}
+.screen{height:100%;border-radius:20px 20px 0 0;background:#FBFBFA;overflow:hidden;display:flex;flex-direction:column;font-size:12px;color:var(--ink)}
+.s-top{display:flex;justify-content:space-between;align-items:center;padding:12px 18px;font-weight:600}
+.s-top .pill{padding:4px 12px;border-radius:999px;box-shadow:0 0 0 1px var(--line);background:#fff;font-weight:500}
+.s-split{flex:1;display:grid;grid-template-columns:1.1fr 1fr;gap:12px;padding:0 14px;min-height:0}
+.pane{background:#fff;border-radius:16px 16px 0 0;box-shadow:0 0 0 1px var(--line),0 8px 30px -18px rgba(20,30,60,.25);padding:14px;display:flex;flex-direction:column;gap:10px;min-height:0}
+.vid{position:relative;border-radius:12px;aspect-ratio:16/9;background:radial-gradient(70% 90% at 30% 20%,#7FC8F8,#0C68DA 70%);display:grid;place-items:center;overflow:hidden}
+.vid::before{content:"";position:absolute;width:46%;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle,rgba(248,224,138,.9),rgba(248,224,138,0) 70%);top:-10%;right:-6%}
+.play{width:46px;height:46px;border-radius:50%;background:#fff;display:grid;place-items:center;box-shadow:0 6px 18px rgba(0,0,0,.2);position:relative}
+.v-bar{height:4px;border-radius:2px;background:var(--pale-2);position:relative}
+.v-bar::after{content:"";position:absolute;inset:0 58% 0 0;border-radius:2px;background:var(--blue)}
+.v-t{font-weight:700;font-size:14px}
+.note{display:flex;justify-content:space-between;align-items:center;padding:8px 8px 8px 14px;border-radius:999px;background:var(--pale);color:var(--muted)}
+.note b{padding:5px 12px;border-radius:999px;background:var(--blue);color:#fff;font-weight:600}
+.q-k{font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+.q{font-size:16px;font-weight:700;line-height:1.3;letter-spacing:-.01em}
+.opt{display:flex;gap:9px;align-items:center;padding:9px 11px;border-radius:12px;box-shadow:0 0 0 1px var(--line);background:#fff}
+.opt i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:700;background:var(--pale);flex:none}
+.opt.right{background:var(--ink);color:#fff;box-shadow:0 0 0 4px rgba(79,179,246,.18),0 0 22px rgba(79,179,246,.5)}
+.opt.right i{background:#fff;color:var(--ink)}
+.chips{display:flex;gap:6px;align-items:center;color:var(--ink-2);flex-wrap:wrap}
+.chips span{padding:4px 11px;border-radius:999px;box-shadow:0 0 0 1px var(--line);font-weight:600;background:#fff}
+.chips span.on{background:var(--blue);color:#fff;box-shadow:none}
+@media (max-width:700px){.device{aspect-ratio:auto;padding:10px 10px 0;border-radius:24px 24px 0 0}.s-split{grid-template-columns:1fr}.s-split .pane:first-child{display:none}.screen{border-radius:16px 16px 0 0}.pane{padding-bottom:18px}}
+
+/* Section heads */
+.sec{padding-block:120px}
+.sec h2{font-size:clamp(36px,4.6vw,60px);line-height:1.08}
+.sec .sub{margin-top:22px;font-size:clamp(18px,1.6vw,21px);color:var(--ink-2);max-width:26em}
+
+/* How it works */
+.how{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.4fr);gap:40px;align-items:center}
+.flow{position:relative;aspect-ratio:1.25/1;max-width:100%}
+.flow svg.lines{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.flow .lines path{fill:none;stroke:var(--sky);stroke-width:1.6;vector-effect:non-scaling-stroke}
+.flow .lines .bolt,.flow .lines .glow{stroke-linecap:round;stroke-dasharray:28 72;animation:current 2.8s linear infinite}
+.flow .lines .bolt{stroke:#1F8BFF;stroke-width:2.2}
+.flow .lines .glow{stroke:#6EC3FF;stroke-width:8;opacity:.7;filter:blur(3px)}
+@keyframes current{from{stroke-dashoffset:100}to{stroke-dashoffset:0}}
+@media (prefers-reduced-motion:reduce){.flow .lines .bolt,.flow .lines .glow{animation:none;stroke-dasharray:none;opacity:.25}}
+.srcc{position:absolute;width:30%;border-radius:18px;background:var(--pale);padding:12px;display:flex;flex-direction:column;gap:9px;box-shadow:0 0 0 1px rgba(230,234,240,.7)}
+.srcc .h{display:flex;align-items:center;gap:9px}
+.srcc .h .ln{flex:1;height:5px;border-radius:3px;background:#D5DCE6}
+.srcc .body{border-radius:11px;background:#fff;padding:10px;display:flex;flex-direction:column;gap:7px}
+.srcc .body i{display:block;height:5px;border-radius:3px;background:#E3E8EF}
+.ic{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;font-size:10px;font-weight:800;color:#fff;flex:none}
+/* The lines feed straight into the bulb, which sits on a small power tower with the label beside it.
+   Lines meet at (64%, 50.25%); the bulb's glass edge sits there. */
+.hub{position:absolute;inset:0;pointer-events:none}
+/* Bulb and tower share one centered column, so the bulb always sits dead center on the tower */
+.hub .mast{position:absolute;left:61%;top:40.5%;width:17%;display:flex;flex-direction:column;align-items:center}
+.hub .bulb{position:relative;display:block;width:100%;line-height:0;z-index:2}
+.hub .bulb img{position:relative;z-index:1;width:100%;height:auto}
+.hub .tower{display:block;width:72%;height:auto;margin-top:-3%;color:#B5C7DE;position:relative;z-index:1}
+.hub-t{position:absolute;left:79%;top:66%;width:21%;display:flex;flex-direction:column;gap:5px;padding-left:12px;border-left:2px solid var(--sky)}
+.hub-t b{font-size:17px;color:var(--blue)}
+.hub-t small{color:var(--muted);font-size:13px;line-height:1.35}
+/* Bulb flickers on like it's warming up, then glows. Three flashes max per 6s cycle, all slower than 3 per second (WCAG 2.3.1), on a small area. */
+.hub .bulb img{animation:bulb 6s ease-in-out infinite}
+@keyframes bulb{
+  0%,2%{filter:brightness(.8) saturate(.55) drop-shadow(0 0 3px rgba(59,189,254,.15))}
+  6%{filter:brightness(1.12) saturate(1) drop-shadow(0 0 13px rgba(59,189,254,.7))}
+  12%{filter:brightness(.82) saturate(.6) drop-shadow(0 0 3px rgba(59,189,254,.15))}
+  19%{filter:brightness(1.12) saturate(1) drop-shadow(0 0 13px rgba(59,189,254,.7))}
+  25%{filter:brightness(.88) saturate(.7) drop-shadow(0 0 5px rgba(59,189,254,.25))}
+  33%,78%{filter:brightness(1.1) saturate(1.05) drop-shadow(0 0 16px rgba(59,189,254,.85))}
+  100%{filter:brightness(.8) saturate(.55) drop-shadow(0 0 3px rgba(59,189,254,.15))}}
+/* Gold filament glow behind the spark, shows through the icon's clear center */
+.hub .bulb::after{content:"";position:absolute;z-index:0;left:46.5%;top:40%;width:22%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle,rgba(255,240,170,1) 0,rgba(255,200,50,.95) 35%,rgba(245,166,35,.4) 60%,rgba(245,166,35,0) 75%);
+  filter:blur(.5px);animation:gold 6s ease-in-out infinite}
+@keyframes gold{0%,2%{opacity:0}6%{opacity:.85}12%{opacity:.05}19%{opacity:.85}25%{opacity:.15}33%,78%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.hub .bulb img,.hub .bulb::after{animation:none}}
+@media (max-width:900px){.how{grid-template-columns:1fr}}
+@media (max-width:560px){.srcc{padding:8px;gap:6px;border-radius:12px}.srcc .body{padding:6px}.hub-t{padding-left:8px;left:78%;width:22%}.hub-t small{display:none}.hub-t b{font-size:13px}}
+
+/* Feature carousel */
+.car-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;margin-bottom:44px}
+.track{display:flex;gap:28px;overflow-x:auto;scroll-snap-type:x mandatory;padding-inline:max(24px,calc((100vw - 1192px)/2));scrollbar-width:none;overscroll-behavior-x:contain}
+.track::-webkit-scrollbar{display:none}
+.slide{flex:0 0 min(1192px,calc(100vw - 48px));scroll-snap-align:center;display:flex;flex-direction:column;gap:30px}
+.stage{position:relative;height:560px;border-radius:40px;background:var(--pale);display:grid;place-items:center;overflow:hidden;padding:24px}
+.win{position:relative;width:min(600px,100%);border-radius:28px;background:#fff;padding:26px;display:flex;flex-direction:column;gap:14px;isolation:isolate;box-shadow:0 30px 70px -40px rgba(20,40,90,.35)}
+.win::before{content:"";position:absolute;inset:-3px -3px 40%;z-index:-2;border-radius:30px;background:var(--glow);filter:blur(22px);opacity:.75}
+.win::after{content:"";position:absolute;inset:0;z-index:-1;border-radius:28px;background:#fff}
+.win .bar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1px solid var(--line);font-weight:700;font-size:15px}
+.win .bar span{color:var(--muted);font-weight:600;font-size:13px;white-space:nowrap}
+.cap{display:flex;justify-content:space-between;align-items:flex-start;gap:30px;padding-inline:12px;flex-wrap:wrap}
+.cap h3{font-size:clamp(30px,3.4vw,46px);line-height:1.1}
+.cap p{margin-top:10px;font-size:clamp(17px,1.5vw,20px);color:var(--ink-2);max-width:36em}
+.dots{display:flex;gap:10px;align-items:center;justify-content:flex-end;padding-top:6px}
+.dots button{width:12px;height:12px;border-radius:999px;border:0;padding:0;background:#D6DCE4;cursor:pointer;transition:width .3s,background .3s}
+.dots button[aria-current="true"]{width:56px;background:linear-gradient(90deg,var(--ink) 55%,#D6DCE4 55%)}
+.arrows{display:flex;gap:10px}
+.arrows button{width:52px;height:52px;border-radius:50%;border:0;background:var(--blue);color:#fff;display:grid;place-items:center;cursor:pointer;box-shadow:0 10px 24px -10px rgba(12,104,218,.8)}
+.arrows button:disabled{background:#C9D3E0;box-shadow:none;cursor:default}
+@media (max-width:700px){.screen{height:auto}.split-demo{--d:40%;height:260px}.split-demo .p{padding:9px;font-size:12px}.split-demo .opt{padding:7px;gap:6px;font-size:12px}.stage{height:auto;min-height:420px;border-radius:28px;padding:20px 14px}.win{padding:18px}.track{gap:14px}.dots{justify-content:center}}
+
+/* slide contents */
+.split-demo{display:grid;grid-template-columns:var(--d,56%) 14px minmax(0,1fr);height:230px;border-radius:16px;background:var(--pale);padding:10px}
+.split-demo .p{border-radius:12px;background:#fff;box-shadow:0 0 0 1px var(--line);padding:12px;display:flex;flex-direction:column;gap:8px;overflow:hidden;font-size:13px;min-width:0}
+.split-demo .vid{aspect-ratio:auto;flex:1}
+.grip{cursor:col-resize;display:grid;place-items:center;touch-action:none}
+.grip::before{content:"";width:4px;height:44px;border-radius:2px;background:#C3CDDA;transition:background .2s}
+.grip:hover::before,.grip.drag::before{background:var(--blue)}
+.hint-line{font-size:13.5px;color:var(--muted);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.hint-line b{color:var(--blue);font-variant-numeric:tabular-nums}
+.conf-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px;color:var(--ink-2)}
+.cb{font:inherit;font-weight:600;height:38px;padding:0 18px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer}
+.cb[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:#fff}
+.out{padding:12px 14px;border-radius:14px;background:var(--pale);font-size:15px;min-height:48px}
+.out b{color:var(--blue)}
+.mix{display:flex;flex-direction:column;gap:8px}
+.mix div{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:14px;box-shadow:0 0 0 1px var(--line);font-size:14.5px;min-width:0}
+.mix div span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mix i{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-style:normal;color:#fff;font-size:12px;font-weight:700;flex:none}
+.mix small{margin-left:auto;color:var(--muted);font-size:12.5px;white-space:nowrap}
+.rounds{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding-block:10px}
+.rounds .big{font-size:64px;font-weight:600;letter-spacing:-.04em;line-height:1}
+.rounds .big small{font-size:28px;color:var(--muted)}
+.segs{display:flex;gap:16px}
+.segs div{display:flex;gap:5px}
+.segs i{width:30px;height:6px;border-radius:3px;background:var(--blue)}
+.segs div+div i{background:#D6DCE4}
+.ring{width:40px;height:40px;transform:rotate(-90deg);flex:none}
+.ring circle{fill:none;stroke:var(--pale-2);stroke-width:3.5}
+.ring .f{stroke:var(--sky);stroke-linecap:round;stroke-dasharray:94.25;stroke-dashoffset:30}
+.tb-h{display:flex;gap:14px;align-items:center}
+.tb-h small{display:block;color:var(--ink-2);font-size:14px}
+.field{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 8px 8px 16px;border-radius:24px;background:var(--pale);font-size:14.5px}
+.field b{padding:7px 16px;border-radius:999px;background:var(--blue);color:#fff;font-weight:600;flex:none}
+.bul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:15px}
+.bul li::marker{color:var(--blue)}
+.ladder{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;padding-block:14px}
+.ladder span{padding:10px 14px;border-radius:14px;font-size:14px;font-weight:600;background:var(--pale);color:var(--ink-2)}
+.ladder span.ok{background:rgba(79,179,246,.14);color:var(--blue)}
+.ladder span.up{background:var(--blue);color:#fff;box-shadow:0 10px 24px -8px rgba(12,104,218,.7)}
+.ladder em{font-style:normal;color:#A9B6C8}
+.flames{display:flex;justify-content:center;gap:clamp(14px,4vw,34px);padding-block:18px;flex-wrap:wrap}
+.flames figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:10px;font-size:14px;color:var(--ink-2)}
+.flames .f{width:74px;height:74px;border-radius:22px;display:grid;place-items:center;background:var(--pale)}
+.flames .lit .f{background:radial-gradient(circle at 50% 62%,rgba(59,189,254,.35),rgba(12,104,218,.08) 60%,transparent 80%);box-shadow:0 0 30px rgba(59,189,254,.5)}
+.flames .warm svg{filter:grayscale(.35) opacity(.8)}
+.flames .out svg{filter:grayscale(1) opacity(.3)}
+.fb{padding:14px 16px;border-radius:16px;border:1px solid #CFE7FB;background:linear-gradient(180deg,rgba(79,179,246,.08),transparent)}
+.fb h4{margin:0 0 4px;font-size:17px}
+.fb p{font-size:14.5px;color:var(--ink-2)}
+
+/* Subjects: the same tiles as the app's Home screen */
+.subj{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.4fr);gap:48px;align-items:center}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.tile{position:relative;display:flex;flex-direction:column;background:#fff;border-radius:30px;border:1px solid var(--line);box-shadow:0 1px 2px rgba(20,30,60,.04),0 14px 34px -18px rgba(20,40,90,.22);overflow:hidden;text-decoration:none;color:var(--ink);transition:transform .2s,box-shadow .2s}
+.tile:hover{transform:translateY(-3px);box-shadow:0 2px 6px rgba(20,30,60,.06),0 26px 50px -24px rgba(12,104,218,.4)}
+.tile .art{aspect-ratio:10/7;margin:10px 10px 0;border-radius:22px;overflow:hidden;background:var(--pale)}
+.tile .art svg{display:block;width:100%;height:100%}
+.tile-b{padding:12px 16px 16px;display:flex;flex-direction:column;gap:12px}
+.tile-h{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.tile-h b{font-size:18px;font-weight:700;letter-spacing:-.01em}
+.ring2{position:relative;flex:none;width:46px;height:46px}
+.ring2 span{position:absolute;inset:0;display:grid;place-items:center;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.segs{display:flex;gap:4px}
+.segs i,.legend i{flex:1;height:8px;border-radius:4px;background:#E7ECF3}
+.segs i.s,.legend i.s{background:var(--sky)}
+.segs i.l,.legend i.l{background:var(--sun)}
+.segs i.r,.legend i.r{background:transparent;border:1.5px dashed var(--coral)}
+.due{position:absolute;top:18px;right:18px;z-index:1;min-width:26px;height:26px;padding:0 7px;border-radius:13px;background:var(--blue);color:#fff;font-size:12.5px;font-weight:700;display:grid;place-items:center;box-shadow:0 4px 12px rgba(12,104,218,.4)}
+.tile-add{grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:16px;min-height:96px;border:1.5px dashed rgba(12,104,218,.35);border-radius:30px;color:var(--ink-2);font-size:16px;font-weight:600;text-decoration:none;text-align:center;padding:18px;transition:border-color .15s,background .15s,color .15s}
+.tile-add span{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;background:rgba(12,104,218,.08);color:var(--blue)}
+.tile-add b{display:flex;flex-direction:column;text-align:left;font-weight:600}
+.tile-add small{font-size:13px;font-weight:500;color:var(--muted)}
+.tile-add:hover{border-color:var(--blue);background:rgba(12,104,218,.03);color:var(--blue)}
+.legend{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;font-size:14px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:8px}
+.legend i{flex:none;width:22px}
+.legend i.n{background:#E7ECF3}
+.legend em{margin-left:auto;font-style:normal;font-size:13px;color:var(--muted)}
+@media (max-width:1000px){.subj{grid-template-columns:1fr}}
+@media (max-width:640px){.tiles{grid-template-columns:1fr 1fr;gap:12px}.tile{border-radius:22px}.tile .art{margin:7px 7px 0;border-radius:16px}.tile-b{padding:10px 12px 12px;gap:10px}.tile-h b{font-size:15px}.ring2{width:38px;height:38px}.ring2 svg{width:38px;height:38px}.ring2 span{font-size:10.5px}.tile-add{min-height:84px;border-radius:22px}.legend em{margin-left:0;width:100%}}
+
+/* Final */
+.final{padding-bottom:40px}
+.final .hero-card{padding:100px 24px 104px}
+.final h2{font-size:clamp(38px,5vw,68px);line-height:1.05}
+.final p{margin-top:18px;font-size:20px;color:var(--ink-2)}
+.foot{padding-block:40px 60px}
+.foot .wrap{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;color:var(--muted);font-size:15px}
+.foot .brand{font-size:20px}
+.foot .brand img{width:28px;height:28px;border-radius:8px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
+</style>
+
+<nav class="nav" aria-label="Main">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="__ICON__" alt="">Intuish</a>
+    <div class="links"><a href="#top" class="on">Overview</a><a href="#how">How it works</a><a href="#features">Features</a><a href="#subjects">Subjects</a></div>
+    <a class="get" data-app href="app/">Get the App</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <h1>From watching<br>to <mark>knowing</mark></h1>
+    <p class="lede">Videos, PDFs and websites teach. Intuish checks what you understood and makes it stick.</p>
+    <div class="hero-act"><a class="btn" data-app href="app/">Try Intuish free</a><a class="about" href="#how"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M10 8.5v7l5.5-3.5z" fill="currentColor" stroke="none"/></svg>See how it works <span aria-hidden="true">›</span></a></div>
+    <div class="trio">
+      <a class="tcard" href="#how"><div class="th"><h2>Learn from anything</h2><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg></div><img src="__IMG_learn__" alt="A student with an iPad as a YouTube video, a PDF and a website flow into the Intuish lightbulb" width="526" height="534"></a>
+      <a class="tcard" href="#features"><div class="th"><h2>Check what you understood</h2><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg></div><img src="__IMG_understand__" alt="Hands holding an iPad with a lesson video beside a question, with Guess, Unsure and Certain buttons" width="544" height="516"></a>
+      <a class="tcard" href="#features"><div class="th"><h2>Make it stick</h2><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg></div><img src="__IMG_remember__" alt="A student on a train reviewing on her phone, beside a review timeline of 10 minutes, 1, 3, 7, 16 and 35 days" width="529" height="568"></a>
+    </div>
+  </div>
+</header>
+
+<section class="sec" id="how">
+  <div class="wrap how">
+    <div>
+      <h2>How it works</h2>
+      <p class="sub">Bring the lessons you already learn from. Intuish sits beside them, asks the right questions while you watch, and brings each idea back right before you'd forget it.</p>
+    </div>
+    <div class="flow" aria-label="Websites, YouTube videos, notes and PDFs all flow into Intuish">
+      <svg class="lines" viewBox="0 0 1000 800" preserveAspectRatio="none" aria-hidden="true">
+        <path id="p1" d="M300 150 C 360 300, 520 380, 640 402"/>
+        <path id="p3" d="M330 402 L 640 402"/>
+        <path id="p4" d="M330 560 C 430 480, 540 420, 640 402"/>
+        <path id="p5" d="M370 690 C 470 560, 560 440, 640 402"/>
+        <path class="glow" d="M300 150 C 360 300, 520 380, 640 402" pathLength="100" style="animation-duration:3.2s"/><path class="bolt" d="M300 150 C 360 300, 520 380, 640 402" pathLength="100" style="animation-duration:3.2s"/>
+        <path class="glow" d="M330 402 L 640 402" pathLength="100" style="animation-duration:2.1s"/><path class="bolt" d="M330 402 L 640 402" pathLength="100" style="animation-duration:2.1s"/>
+        <path class="glow" d="M330 560 C 430 480, 540 420, 640 402" pathLength="100" style="animation-duration:2.8s"/><path class="bolt" d="M330 560 C 430 480, 540 420, 640 402" pathLength="100" style="animation-duration:2.8s"/>
+        <path class="glow" d="M370 690 C 470 560, 560 440, 640 402" pathLength="100" style="animation-duration:3.5s"/><path class="bolt" d="M370 690 C 470 560, 560 440, 640 402" pathLength="100" style="animation-duration:3.5s"/>
+      </svg>
+      <div class="srcc" style="left:8%;top:0"><div class="h"><span class="ic" style="background:#2E6FD8"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg></span><span class="ln"></span></div><div class="body"><i></i><i style="width:70%"></i><i style="width:85%"></i></div></div>
+      <div class="srcc" style="left:3%;top:40%"><div class="h"><span class="ic" style="background:#E53935">▶</span><span class="ln"></span></div><div class="body"><div style="height:30px;display:grid;place-items:center;color:#C3CBD6;font-size:13px">▶</div><div style="height:3px;border-radius:2px;background:linear-gradient(90deg,#E53935 60%,#E3E8EF 60%)"></div></div></div>
+      <div class="srcc" style="left:0;top:64%;width:33%"><div class="h"><span class="ic" style="background:#E8A23B">✎</span><span class="ln"></span></div><div class="body"><i style="width:40%"></i><i></i><i style="width:60%"></i></div></div>
+      <div class="srcc" style="left:14%;top:86%;width:26%"><div class="h"><span class="ic" style="background:#fff;color:#E53935;box-shadow:0 0 0 1.5px #E53935 inset;font-size:8px">PDF</span><span class="ln"></span></div></div>
+      <div class="hub"><div class="mast"><span class="bulb"><img src="__ICON__" alt=""></span><svg class="tower" viewBox="0 0 100 150" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"><path d="M42 2 L14 148 M58 2 L86 148"/><path d="M8 26 H92 M18 62 H82"/><path d="M8 26 l8 8 M92 26 l-8 8 M18 62 l6 7 M82 62 l-6 7"/><path d="M42 2 L56 26 L38 62 L63 100 L24 148 M58 2 L44 26 L62 62 L37 100 L76 148"/><path d="M33 100 H67"/><path d="M4 148 H96"/></g></svg></div><div class="hub-t"><b>Intuish</b><small>Questions, hints and review, grounded in your lesson</small></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="features" style="padding-top:40px;padding-bottom:60px">
+  <div class="wrap car-head">
+    <div><h2>Made for how memory works</h2><p class="sub">Small habits from learning research, built into every lesson. Calm by design, with no confetti and no countdowns.</p></div>
+    <div class="arrows"><button id="prev" aria-label="Previous feature"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button><button id="next" aria-label="Next feature"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div>
+  </div>
+  <div class="track" id="track">
+
+    <article class="slide" aria-label="Split screen">
+      <div class="stage"><div class="win">
+        <div class="bar">Understanding Meisner Repetition<span>Acting</span></div>
+        <div class="split-demo" id="demo">
+          <div class="p"><div class="vid"><div class="play"><svg width="14" height="14" viewBox="0 0 24 24" fill="#0C68DA" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg></div></div><div class="v-bar"></div></div>
+          <div class="grip" id="grip" role="separator" aria-orientation="vertical" aria-label="Resize video and questions" aria-valuemin="30" aria-valuemax="70" aria-valuenow="56" tabindex="0"></div>
+          <div class="p"><b>Meisner described acting as “living truthfully under…”</b><div class="opt right"><i>A</i>Imaginary circumstances</div><div class="opt"><i>B</i>Stage lighting</div></div>
+        </div>
+        <div class="hint-line"><span>Drag the line, or use the arrow keys</span><span>Video <b id="pct">56 / 44</b> Questions</span></div>
+      </div></div>
+      <div class="cap"><div><h3>Split screen</h3><p>The lesson on one side, practice on the other. Drag the divider to give either more room, or go full screen and still jot notes.</p></div></div>
+    </article>
+
+    <article class="slide" aria-label="Confidence taps">
+      <div class="stage"><div class="win">
+        <div class="bar">Memory<span>Concept</span></div>
+        <div class="q">What are the three basic stages of memory?</div>
+        <div class="opt right"><i>B</i>Encoding, storage, retrieval</div>
+        <div class="conf-row" role="group" aria-label="How sure are you?">How sure are you?<button class="cb" data-c="guess" aria-pressed="false">Guess</button><button class="cb" data-c="unsure" aria-pressed="false">Unsure</button><button class="cb" data-c="certain" aria-pressed="true">Certain</button></div>
+        <div class="out" id="cfOut" aria-live="polite">Right, and you were sure. <b>Next review in 3 days.</b></div>
+      </div></div>
+      <div class="cap"><div><h3>Confidence taps</h3><p>Tell Intuish when it was a guess. Lucky guesses come back sooner so they turn into real knowing. Try tapping one.</p></div></div>
+    </article>
+
+    <article class="slide" aria-label="Mixed review">
+      <div class="stage"><div class="win">
+        <div class="bar">Remember · 3 subjects mixed<span>5 due</span></div>
+        <div class="mix">
+          <div><i style="background:#B3263A">🎭</i><span>Acting is living truthfully under…</span><small>Acting</small></div>
+          <div><i style="background:#B3263A">🎭</i><span>What does repetition train?</span><small>Acting</small></div>
+          <div><i style="background:#E8A23B">¡!</i><span>“Tengo hambre” means…</span><small>Spanish</small></div>
+          <div><i style="background:#16706A">♪</i><span>How many half steps in a major third?</span><small>Music Theory</small></div>
+          <div><i style="background:#16706A">♪</i><span>What makes a chord minor?</span><small>Music Theory</small></div>
+        </div>
+      </div></div>
+      <div class="cap"><div><h3>Mixed review</h3><p>Remember shuffles what's due across your subjects, so you practice picking the right idea, not just repeating the last one.</p></div></div>
+    </article>
+
+    <article class="slide" aria-label="Short rounds">
+      <div class="stage"><div class="win">
+        <div class="bar">Memory<span>Round 1 of 2 done</span></div>
+        <div class="rounds"><div class="big">4<small> / 4</small></div><div class="segs"><div><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i></div></div><p style="color:var(--ink-2)">All on the first try. Take a breath, or keep going.</p></div>
+      </div></div>
+      <div class="cap"><div><h3>3 to 5 questions at a time</h3><p>Longer lessons split into short rounds with a pause in between. Stop after any round and pick up right where you left off.</p></div></div>
+    </article>
+
+    <article class="slide" aria-label="Teach it back">
+      <div class="stage"><div class="win">
+        <div class="tb-h"><svg class="ring" viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15"/><circle class="f" cx="18" cy="18" r="15"/></svg><div><b>Teach it back</b><small>Explain Memory in one sentence, as if to a 10-year-old.</small></div></div>
+        <div class="field"><span>Memory is like a path in the grass: the more you walk it, the clearer it gets.</span><b>Save</b></div>
+      </div></div>
+      <div class="cap"><div><h3>Teach it back</h3><p>After a lesson, sum it up in one sentence in about 30 seconds. Explaining it simply shows you really get it, and it saves to your notes.</p></div></div>
+    </article>
+
+    <article class="slide" aria-label="Instant feedback">
+      <div class="stage"><div class="win">
+        <div class="q">Grouping 5551234567 into 555-123-4567 is an example of…</div>
+        <div class="opt right"><i>B</i>Chunking</div>
+        <div class="fb"><h4>Correct.</h4><p>Grouping digits into chunks makes them easier to hold in short-term memory.</p></div>
+      </div></div>
+      <div class="cap"><div><h3>A small glow when you're right</h3><p>A soft spark on every correct answer and a short explanation after every tap, right or wrong. Hints explain; they never just give the answer away.</p></div></div>
+    </article>
+
+    <article class="slide" aria-label="Adaptive difficulty">
+      <div class="stage"><div class="win">
+        <div class="bar">Memory<span>Stepping it up</span></div>
+        <div class="ladder"><span class="ok">Concept ✓</span><em>→</em><span class="ok">Concept ✓</span><em>→</em><span class="ok">Concept ✓</span><em>→</em><span class="up">Scenario</span></div>
+        <div class="q" style="font-size:18px">Your friend forgets names right after hearing them. What would help most?</div>
+      </div></div>
+      <div class="cap"><div><h3>It steps up when you're ready</h3><p>Three right in a row and the next question becomes a scenario, so you practice using the idea, not just naming it.</p></div></div>
+    </article>
+
+    <article class="slide" aria-label="Notes">
+      <div class="stage"><div class="win">
+        <div class="bar">Notes<span>Download PDF</span></div>
+        <div class="field"><span style="color:var(--muted)">Add a note about this lesson</span><b>Add</b></div>
+        <ul class="bul"><li>Listen before you speak</li><li>React to what your partner gives you</li><li>In my words: repetition keeps you out of your head</li></ul>
+      </div></div>
+      <div class="cap"><div><h3>Notes under the video</h3><p>Jot a thought while you watch, even in full screen. Notes line up as bullets and save as a PDF, grouped by day and lesson.</p></div></div>
+    </article>
+
+    <article class="slide" aria-label="Streak spark">
+      <div class="stage"><div class="win">
+        <div class="flames">
+          <figure class="lit"><span class="f">__FLAME__</span>Studied today</figure>
+          <figure class="warm"><span class="f">__FLAME__</span>Waiting on you</figure>
+          <figure class="out"><span class="f">__FLAME__</span>Missed a day</figure>
+        </div>
+      </div></div>
+      <div class="cap"><div><h3>A spark you keep lit</h3><p>Study any amount and your streak glows. Skip a day and it quietly dims until you come back. No nagging.</p></div></div>
+    </article>
+
+  </div>
+  <div class="wrap"><div class="dots" id="dots" aria-label="Features"></div></div>
+</section>
+
+<section class="sec" id="subjects">
+  <div class="wrap subj">
+    <div>
+      <h2>Start with a ready-made subject</h2>
+      <p class="sub">Every new learner starts with Psychology. Add any of these with one tap, each with starter lessons and questions already written. Or make your own from any video, PDF or link.</p>
+    </div>
+    <div class="tiles-wrap">
+    <div class="tiles">
+      <a class="tile" data-app href="app/" aria-label="Psychology, 72% known"><div class="art">__ART_psych__</div><div class="tile-b"><div class="tile-h"><b>Psychology</b><div class="ring2"><svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true"><circle cx="23.0" cy="23.0" r="20.5" fill="none" stroke="#E7ECF3" stroke-width="5"/><circle cx="23.0" cy="23.0" r="20.5" fill="none" stroke="var(--blue)" stroke-width="5" stroke-linecap="round" stroke-dasharray="92.7 128.8" transform="rotate(-90 23.0 23.0)"/></svg><span>72%</span></div></div><div class="segs"><i class="s"></i><i class="s"></i><i class="l"></i></div></div></a>
+      <a class="tile" data-app href="app/" aria-label="Acting, 48% known"><span class="due" title="Due to remember">2</span><div class="art">__ART_acting__</div><div class="tile-b"><div class="tile-h"><b>Acting</b><div class="ring2"><svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true"><circle cx="23.0" cy="23.0" r="20.5" fill="none" stroke="#E7ECF3" stroke-width="5"/><circle cx="23.0" cy="23.0" r="20.5" fill="none" stroke="var(--blue)" stroke-width="5" stroke-linecap="round" stroke-dasharray="61.8 128.8" transform="rotate(-90 23.0 23.0)"/></svg><span>48%</span></div></div><div class="segs"><i class="s"></i><i class="l"></i><i class="r"></i></div></div></a>
+      <a class="tile" data-app href="app/" aria-label="Music Theory, 20% known"><div class="art">__ART_music__</div><div class="tile-b"><div class="tile-h"><b>Music Theory</b><div class="ring2"><svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true"><circle cx="23.0" cy="23.0" r="20.5" fill="none" stroke="#E7ECF3" stroke-width="5"/><circle cx="23.0" cy="23.0" r="20.5" fill="none" stroke="var(--blue)" stroke-width="5" stroke-linecap="round" stroke-dasharray="25.8 128.8" transform="rotate(-90 23.0 23.0)"/></svg><span>20%</span></div></div><div class="segs"><i class="l"></i><i class="n"></i><i class="n"></i></div></div></a>
+      <a class="tile" data-app href="app/" aria-label="Anatomy, 0% known"><div class="art">__ART_anatomy__</div><div class="tile-b"><div class="tile-h"><b>Anatomy</b><div class="ring2"><svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true"><circle cx="23.0" cy="23.0" r="20.5" fill="none" stroke="#E7ECF3" stroke-width="5"/></svg><span>0%</span></div></div><div class="segs"><i class="n"></i><i class="n"></i><i class="n"></i></div></div></a>
+      <a class="tile" data-app href="app/" aria-label="Spanish, 35% known"><span class="due" title="Due to remember">1</span><div class="art">__ART_spanish__</div><div class="tile-b"><div class="tile-h"><b>Spanish</b><div class="ring2"><svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true"><circle cx="23.0" cy="23.0" r="20.5" fill="none" stroke="#E7ECF3" stroke-width="5"/><circle cx="23.0" cy="23.0" r="20.5" fill="none" stroke="var(--blue)" stroke-width="5" stroke-linecap="round" stroke-dasharray="45.1 128.8" transform="rotate(-90 23.0 23.0)"/></svg><span>35%</span></div></div><div class="segs"><i class="l"></i><i class="r"></i><i class="n"></i></div></div></a>
+      <a class="tile" data-app href="app/" aria-label="HiSET, 0% known"><div class="art">__ART_hiset__</div><div class="tile-b"><div class="tile-h"><b>HiSET</b><div class="ring2"><svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true"><circle cx="23.0" cy="23.0" r="20.5" fill="none" stroke="#E7ECF3" stroke-width="5"/></svg><span>0%</span></div></div><div class="segs"><i class="n"></i><i class="n"></i><i class="n"></i></div></div></a>
+      <a class="tile-add" data-app href="app/"><span><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><b>Your own subject<small>Up to 50 videos, PDFs and links</small></b></a>
+    </div>
+    <div class="legend"><span><i class="s"></i>Strong</span><span><i class="l"></i>Learning</span><span><i class="r"></i>Review</span><span><i class="n"></i>New</span><em>Example progress</em></div>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <div class="hero-card">
+      <h2>Ready for your “aha” moment?</h2>
+      <p>Open Intuish in your browser, or add it to your iPad's home screen. It's free.</p>
+      <a class="btn" data-app href="app/" style="margin-top:36px">Get started for free</a>
+    </div>
+  </div>
+</section>
+
+<footer class="foot">
+  <div class="wrap"><a class="brand" href="#top"><img src="__ICON__" alt="">Intuish</a><span>The space between learning and knowing.</span></div>
+</footer>
+
+<script>
+(() => {
+  // Inside the Claude preview, point the app buttons at the app preview
+  if(/claude\.ai|claudeusercontent|claudemcpcontent/.test(location.hostname)) document.querySelectorAll("[data-app]").forEach(a => { a.href = "https://claude.ai/artifact/S4yLBPoHRX2T8uPQz7mMGF"; a.target = "_blank"; a.rel = "noopener"; });
+
+
+  // Nav underline follows the section in view
+  const navLinks = [...document.querySelectorAll(".links a")];
+  const secs = navLinks.map(a => document.querySelector(a.getAttribute("href")));
+  const onScroll = () => { let i = 0; secs.forEach((s, k) => { if(s && s.getBoundingClientRect().top < 160) i = k; }); navLinks.forEach((a, k) => a.classList.toggle("on", k === i)); };
+  addEventListener("scroll", onScroll, {passive:true}); onScroll();
+
+  // Feature carousel
+  const track = document.getElementById("track"), slides = [...track.children], dots = document.getElementById("dots");
+  const prev = document.getElementById("prev"), next = document.getElementById("next");
+  slides.forEach((s, i) => { const b = document.createElement("button"); b.setAttribute("aria-label", "Show " + s.getAttribute("aria-label")); b.onclick = () => go(i); dots.appendChild(b); });
+  let cur = 0;
+  const go = i => { i = Math.max(0, Math.min(slides.length - 1, i)); const s = slides[i]; track.scrollTo({left: s.offsetLeft - (track.clientWidth - s.clientWidth) / 2, behavior: "smooth"}); };
+  const sync = () => {
+    const mid = track.scrollLeft + track.clientWidth / 2; let best = 0, d = 1e9;
+    slides.forEach((s, i) => { const c = s.offsetLeft + s.clientWidth / 2; if(Math.abs(c - mid) < d){ d = Math.abs(c - mid); best = i; } });
+    cur = best; [...dots.children].forEach((b, i) => b.setAttribute("aria-current", i === cur));
+    prev.disabled = cur === 0; next.disabled = cur === slides.length - 1;
+  };
+  track.addEventListener("scroll", () => requestAnimationFrame(sync), {passive:true}); sync();
+  prev.onclick = () => go(cur - 1); next.onclick = () => go(cur + 1);
+  track.tabIndex = 0; track.setAttribute("aria-label", "Features, use the arrow keys to move");
+  track.addEventListener("keydown", e => { if(e.target !== track) return; if(e.key === "ArrowRight"){ e.preventDefault(); go(cur + 1); } if(e.key === "ArrowLeft"){ e.preventDefault(); go(cur - 1); } });
+
+  // Draggable split demo
+  const demo = document.getElementById("demo"), grip = document.getElementById("grip"), pct = document.getElementById("pct");
+  const set = v => { v = Math.max(30, Math.min(70, Math.round(v))); demo.style.setProperty("--d", v + "%"); grip.setAttribute("aria-valuenow", v); pct.textContent = `${v} / ${100 - v}`; };
+  grip.addEventListener("pointerdown", e => { e.preventDefault(); grip.setPointerCapture(e.pointerId); grip.classList.add("drag"); });
+  grip.addEventListener("pointermove", e => { if(!grip.hasPointerCapture(e.pointerId)) return; const r = demo.getBoundingClientRect(); set((e.clientX - r.left) / r.width * 100); });
+  grip.addEventListener("pointerup", () => grip.classList.remove("drag"));
+  grip.addEventListener("keydown", e => { const v = +grip.getAttribute("aria-valuenow"); if(e.key === "ArrowLeft"){ e.preventDefault(); e.stopPropagation(); set(v - 5); } if(e.key === "ArrowRight"){ e.preventDefault(); e.stopPropagation(); set(v + 5); } });
+
+  // Confidence taps demo
+  const out = document.getElementById("cfOut");
+  const say = {guess:"Right, on a guess. <b>It comes back in 10 minutes</b> so it really sticks.", unsure:"Right. <b>It comes back tomorrow</b> until it feels solid.", certain:"Right, and you were sure. <b>Next review in 3 days.</b>"};
+  document.querySelectorAll(".cb").forEach(b => b.onclick = () => { document.querySelectorAll(".cb").forEach(x => x.setAttribute("aria-pressed", x === b)); out.innerHTML = say[b.dataset.c]; });
+})();
+</script>
