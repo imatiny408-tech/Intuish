@@ -656,7 +656,9 @@ function showVideoError(code){
   const f = $("#frame"); f.classList.add("error");
   if(code === "blocked"){ // preview build: YouTube can't load here, so offer a clean card instead of a broken player
     f.classList.add("preview"); const v = $("#vidMsg"); v.hidden = false; v.classList.add("pv");
-    v.innerHTML = `<span class="pv-badge">Preview mode</span><button class="pv-play" id="pvPlay" aria-label="Test the quiz directly">${'<svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>'}</button><b>Click to test the quiz directly</b><span>Videos play once Intuish is hosted.</span><a class="pv-yt" href="${ytUrl(videoOf(cur), P.t)}" target="_blank" rel="noopener">Watch on YouTube ↗</a>`;
+    // Only the claude.ai preview is "preview mode"; on the real site this means the network is blocking YouTube
+    const hosted = /github\.io$/.test(location.hostname) || !/claude|anthropic|usercontent/i.test(location.hostname);
+    v.innerHTML = `<span class="pv-badge">${hosted ? "Video unavailable" : "Preview mode"}</span><button class="pv-play" id="pvPlay" aria-label="Go to the questions">${'<svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>'}</button><b>${hosted ? "Practice the questions" : "Click to test the quiz directly"}</b><span>${hosted ? "YouTube couldn’t load. Your network may be blocking it." : "Videos play once Intuish is hosted."}</span><a class="pv-yt" href="${ytUrl(videoOf(cur), P.t)}" target="_blank" rel="noopener">Watch on YouTube ↗</a>`;
     v.querySelector("#pvPlay").onclick = goToQuiz;
     return;
   }
@@ -1413,7 +1415,7 @@ function installPage(){
       <div><b>Mac</b><span>Safari → File → Add to Dock, or Chrome → Install</span></div>
       <div><b>Windows</b><span>Edge or Chrome → Install icon in the address bar</span></div>
     </div>
-    <p class="set-note">Installing works once Intuish is on its website.</p>`;
+    <p class="set-note">Install from Intuish’s website: imatiny408-tech.github.io/Intuish/app</p>`;
 }
 
 /* ----- Note bar in full-screen video ----- */
