@@ -1301,7 +1301,7 @@ function openSettings(page){
     account: `      ${signed ? `<p class="set-p">Signed in as <b>${esc(pr.email)}</b></p><div><button class="btn outline" id="signOut">Sign out</button></div>`
       : `<p class="set-p">Sign up with your email. We’ll send a link to verify it, no password needed.</p>
         <form id="signForm" class="set-inline"><input id="signEmail" type="email" required placeholder="you@example.com" value="${esc(pr.email)}" autocomplete="email"><button class="btn" type="submit">Send link</button></form>
-        <p class="set-note" id="signNote">${AUTH ? "" : "Sign-in links start working once Intuish is hosted. Everything stays saved on this device until then."}</p>`}`,
+        <p class="set-note" id="signNote">${AUTH ? "" : "Email sign-in is coming soon. Your progress is saved on this device in the meantime."}</p>`}`,
     fonts: page === "fonts" ? fontsPage() : "",
     install: page === "install" ? installPage() : "",
     data: `      <div class="set-row"><button class="btn outline" id="setNotes">Notes</button><button class="btn outline" id="setReset">Erase all my progress</button></div>
@@ -1328,7 +1328,7 @@ function openSettings(page){
     const email = w.querySelector("#signEmail").value.trim(), note = w.querySelector("#signNote");
     D.profile.email = email; save();
     try { await sendLink(email); note.textContent = `Check ${email} for a link to finish signing up.`; }
-    catch(e){ note.textContent = e.message === "offline" ? "Sign-in links start working once Intuish is hosted. We saved your email on this device." : "The link couldn’t be sent. Check the email and try again."; }
+    catch(e){ note.textContent = e.message === "offline" ? "Email sign-in is coming soon, so no link was sent yet. We saved your email on this device." : "The link couldn’t be sent. Check the email and try again."; }
   };
   if(q(".fp")) q(".fp").onclick = e => {
     const b = e.target.closest("[data-font]");
