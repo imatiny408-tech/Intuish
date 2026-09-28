@@ -11,6 +11,9 @@ import json, subprocess
 art = json.loads(subprocess.check_output(["node", "-e", "global.window={};require(process.argv[1]);process.stdout.write(JSON.stringify(window.ART))", str(here.parent / "js" / "art.js")]))
 for k, v in art.items():
     s = s.replace(f"__ART_{k}__", v)
+fav = "data:image/png;base64," + base64.b64encode((here.parent / "img" / "favicon.png").read_bytes()).decode()
+touch = "data:image/png;base64," + base64.b64encode((here.parent / "img" / "apple-touch-icon.png").read_bytes()).decode()
+s = s.replace("__FAVICON__", fav).replace("__TOUCH__", touch)
 s = s.replace("__ICON__", icon).replace("__FLAME__", flame).replace("__ARROW__", arrow)
 (here / "index.html").write_text(s)
 print(len(s))
