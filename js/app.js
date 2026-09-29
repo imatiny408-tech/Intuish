@@ -1206,21 +1206,34 @@ async function aiAsk(req){
 const parseJSON = (t, open) => { const m = String(t || "").match(open === "[" ? /\[[\s\S]*\]/ : /\{[\s\S]*\}/); if(!m) return null; try { return JSON.parse(m[0]); } catch(e){ return null; } };
 // Sources the word match couldn't place: the AI reads their titles and text, watches videos when the title isn't enough,
 // and files each one in a subcategory, making a new one when nothing fits
-const SORT_SYSTEM = `You organize study sources into subcategories for a study app. Use each source's title, channel, link, text and (for videos) what the video teaches.
+const SORT_SYSTEM = `You organize study sources into subcategories for a study app. Use each source's title, channel, link and text (for videos, the text is the transcript and description).
 Put each source in the existing subcategory it fits best. Only if none fits, make a new subcategory; name it in the app's style: a short learning phrase starting with an -ing verb, like "Learning Website Layout" or "Designing With AI". Reuse one new name for similar sources and make as few new ones as possible. Never use "My sources".
 Reply with only JSON.`;
+// A video's transcript (and description) through the public page reader; YouTube blocks apps from fetching captions directly
+async function videoTranscript(L){
+  const v = videoOf(L), key = "src:" + L.id, m = D.meta[key] || {};
+  if(m.ex) return m.ex;
+  const t = await readLinkText(`https://www.youtube.com/watch?v=${v}`);
+  const clean = t.replace(/\s+/g, " ").trim();
+  if(clean.length < 200) return "";
+  D.meta[key] = Object.assign(m, {ex:clean.slice(0, 6000), kw:m.kw || topWords(clean, 60)}); save();
+  return D.meta[key].ex;
+}
 async function aiSortLeftovers(subjId, left){
+  // Read the transcripts first, a few at a time
+  const vq = left.filter(L => kindOf(L) === "video"); const tw = async () => { while(vq.length){ try { await videoTranscript(vq.shift()); } catch(e){} } };
+  await Promise.all([tw(), tw(), tw()]);
   const s = subjById(subjId), topics = topicsOf(s).filter(t => t !== MY);
   const goalFor = t => (D.goals[subjId] || []).filter(g => topicName(g) === t)[0] || "";
   const info = L => { const v = kindOf(L) === "video" ? videoOf(L) : null, m = (v && D.meta[v]) || {}, sm = D.meta["src:" + L.id] || {};
-    return {kind:kindOf(L), title:m.title || L.title, channel:m.author || "", link:L.url || (v ? `https://www.youtube.com/watch?v=${v}` : ""), file:L.file || "", text:(sm.ex || sm.kw || "").slice(0, 700)}; };
+    return {kind:kindOf(L), title:m.title || L.title, channel:m.author || "", link:L.url || (v ? `https://www.youtube.com/watch?v=${v}` : ""), file:L.file || "", text:(sm.ex || sm.kw || "").slice(0, 1500)}; };
   const list = left.map((L, i) => Object.assign({i}, info(L)));
   const intro = `Subject: ${s.name}\nSubcategories:\n${topics.map(t => `- ${t}${goalFor(t) ? ` (goal: ${goalFor(t)})` : ""}`).join("\n") || "(none yet)"}`;
   const out = new Map();
   const batch = parseJSON(await aiAsk({system:SORT_SYSTEM, prompt:`${intro}\n\nSources:\n${JSON.stringify(list)}\n\nReply as a JSON array: [{"i":0,"to":"subcategory name","sure":true}]. Set sure to false when the title and text aren't enough to tell what it teaches.`}), "[") || [];
   batch.forEach(x => { if(x && left[x.i] && x.to) out.set(left[x.i], {to:String(x.to).trim(), sure:x.sure !== false}); });
-  // Not sure (or missing) videos: let the AI watch the video itself
-  const watch = left.filter(L => kindOf(L) === "video" && (!out.has(L) || !out.get(L).sure)).slice(0, 8);
+  // Only when there was no transcript and the title isn't enough: the AI listens to the video itself
+  const watch = left.filter(L => kindOf(L) === "video" && !(D.meta["src:" + L.id] || {}).ex && (!out.has(L) || !out.get(L).sure)).slice(0, 8);
   for(const L of watch){
     const known = [...new Set(topics.concat([...out.values()].map(x => x.to)))];
     try {
