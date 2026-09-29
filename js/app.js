@@ -1124,19 +1124,37 @@ function optBtn(text, i, cls, checked, locked, missed){
 const AI = window.INTUISH_AI || {url:""};
 // Each person can add their own free Google AI key in Settings → AI checking (kept only on their device)
 const aiReady = () => !!(AI.url || (D.ui && D.ui.aiKey));
-const GEMINI_MODEL = "gemini-2.5-flash";
+// Newest free model first; if Google has retired one (404) or it is busy (5xx), the next one is tried
+const GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
+let geminiOk = null; // the model that last worked on this device
 async function geminiDirect(key, req){
   const parts = []; if(req.video) parts.push({file_data:{file_uri:req.video}}); parts.push({text:req.prompt});
-  const body = {system_instruction:{parts:[{text:req.system}]}, contents:[{role:"user", parts}],
-    generationConfig:{temperature:0.2, maxOutputTokens:1500, thinkingConfig:{thinkingBudget:512}, mediaResolution:"MEDIA_RESOLUTION_LOW"}};
-  if(req.search) body.tools = [{google_search:{}}];
-  const call = bd => withTimeout(fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {method:"POST", headers:{"Content-Type":"application/json", "x-goog-api-key":key}, body:JSON.stringify(bd)}), 90000);
-  let r = await call(body);
-  // A video Gemini can't open (private or too long): grade from the text and a web search instead
-  if(!r.ok && parts.length > 1 && r.status !== 400 && r.status !== 403){ body.contents[0].parts = [parts[1]]; body.tools = [{google_search:{}}]; r = await call(body); }
-  if(!r.ok){ let msg = ""; try { msg = ((await r.json()).error || {}).message || ""; } catch(e){} const er = new Error("server " + r.status); er.detail = msg; throw er; }
-  const j = await r.json(), c = (j.candidates || [])[0] || {};
-  return ((c.content || {}).parts || []).map(x => x.text || "").join("");
+  const full = {system_instruction:{parts:[{text:req.system}]}, contents:[{role:"user", parts}], generationConfig:{temperature:0.2, maxOutputTokens:2048}};
+  if(req.search) full.tools = [{google_search:{}}];
+  const post = (model, bd) => withTimeout(fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {method:"POST", headers:{"Content-Type":"application/json", "x-goog-api-key":key}, body:JSON.stringify(bd)}), 90000);
+  const models = geminiOk ? [geminiOk].concat(GEMINI_MODELS.filter(m => m !== geminiOk)) : GEMINI_MODELS;
+  let last = null;
+  for(const model of models){
+    // Try the full request, then a plain text-only one (no video, no search) if the model refuses those extras
+    const tries = [full]; if(parts.length > 1 || req.search) tries.push({system_instruction:full.system_instruction, contents:[{role:"user", parts:[parts[parts.length - 1]]}], generationConfig:full.generationConfig});
+    for(const bd of tries){
+      let r;
+      try { r = await post(model, bd); }
+      catch(e){ last = Object.assign(new Error(e.message === "timeout" ? "timeout" : "network"), {detail:""}); break; }
+      if(r.ok){
+        const j = await r.json(), c = (j.candidates || [])[0] || {};
+        const text = ((c.content || {}).parts || []).filter(x => !x.thought).map(x => x.text || "").join("");
+        if(text){ geminiOk = model; return text; }
+        last = Object.assign(new Error("empty"), {detail:c.finishReason || ""}); continue;
+      }
+      let msg = ""; try { msg = ((await r.json()).error || {}).message || ""; } catch(e){}
+      last = Object.assign(new Error("server " + r.status), {detail:msg});
+      if(r.status === 400 && /api key|API_KEY/i.test(msg)) throw last; // a bad key won't work with any model
+      if(r.status === 403 || r.status === 429) throw last;
+      if(r.status === 404) break; // this model is gone: next model
+    }
+  }
+  throw last || new Error("network");
 }
 const AI_SYSTEM = `You check a student's short written answer in a study app. Judge the meaning, not wording, grammar or spelling. Be fair and kind.
 Reply with only JSON, no other text: {"verdict":"right"|"partly"|"wrong","feedback":"one or two short sentences to the student, saying what was right and what was missing or off"}.
@@ -1722,7 +1740,14 @@ function openSettings(page){
       const t = await geminiDirect(key, {system:"Reply with the single word OK.", prompt:"Say OK."});
       if(!t) throw new Error("empty");
       D.ui.aiKey = key; save(); note.textContent = "AI checking is on."; btn.disabled = false; checkPending(); regradeCurrent(); setTimeout(again, 900);
-    } catch(e){ btn.disabled = false; note.textContent = /400|403/.test(e.message) ? "That key didn’t work. Copy it again from AI Studio and paste the whole thing." : /429/.test(e.message) ? "Google says this key is busy. Wait a minute and try again." : "Couldn’t reach Google. Check your connection and try again."; }
+    } catch(e){ btn.disabled = false; const d = e.detail ? ` Google said: “${e.detail.slice(0, 160)}”` : "";
+      note.textContent = /API key|API_KEY/i.test(e.detail || "") ? "That key didn’t work. Copy it again from AI Studio and paste the whole thing."
+        : /403/.test(e.message) ? "Google turned this key down. In AI Studio, make sure the key’s project has the Gemini API turned on." + d
+        : /429/.test(e.message) ? "Google says this key is busy or over its free limit. Wait a minute and try again." + d
+        : e.message === "network" && !/github\.io$/.test(location.hostname) ? "This preview can’t reach Google. Open Intuish at imatiny408-tech.github.io/Intuish/app and add the key there."
+        : e.message === "network" ? "Couldn’t reach Google. Check your connection, turn off any content blocker for this site, and try again."
+        : e.message === "timeout" ? "Google took too long to answer. Try again."
+        : "Google couldn’t answer right now (" + e.message + ")." + d; }
   };
   if(q("#aiRemove")) q("#aiRemove").onclick = () => { delete D.ui.aiKey; save(); again(); };
   if(q(".theme-row")) q(".theme-row").onclick = e => {
