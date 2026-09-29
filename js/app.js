@@ -1610,11 +1610,16 @@ document.addEventListener("keydown", e => {
 /* ======================= ROUTER ======================= */
 const views = ["homeView","readyView","rememberView","studyView"];
 function show(id){ views.forEach(v => $("#"+v).hidden = v !== id); document.body.classList.toggle("in-study", id === "studyView"); window.scrollTo(0, 0); }
+let aiGateTo = null;
 function route(){
   const h = location.hash.replace(/^#\/?/, "").split("/");
   closeOverlays();
   if(h[0] !== "study") leaveStudy();
-  if((h[0] === "ready" || h[0] === "study") && lessonById(h[1])){
+  if((h[0] === "ready" || h[0] === "study") && lessonById(h[1]) && !aiReady()){
+    // AI checking is required before any lesson: set it up first, then go straight to the lesson
+    aiGateTo = location.hash; history.replaceState(null, "", location.pathname + location.search + "#/");
+    show("homeView"); renderHome(); openSettings("ai");
+  } else if((h[0] === "ready" || h[0] === "study") && lessonById(h[1])){
     const L = lessonById(h[1]);
     if(h[0] === "ready"){ show("readyView"); renderReady(L); }
     else { show("studyView"); openStudy(L); }
@@ -1699,6 +1704,7 @@ const SET_PAGES = [
   ["install", "Get the app", "Put Intuish on your home screen or desktop"],
   ["data", "Your data", "Erase progress"]
 ];
+let aiEdit = false;
 function openSettings(page){
   if(page === "notes"){ openNotes(true); return; }
   const pr = D.profile, signed = !!(pr.session && pr.email);
@@ -1716,11 +1722,15 @@ function openSettings(page){
         <form id="signForm" class="set-inline"><input id="signEmail" type="email" required placeholder="you@example.com" value="${esc(pr.email)}" autocomplete="email"><button class="btn" type="submit">Send link</button></form>
         <p class="set-note" id="signNote"></p>`}`,
     fonts: page === "fonts" ? fontsPage() : "",
-    ai: `      <p class="set-p">Written answers are checked by Google’s free Gemini AI before they count toward your progress. Multiple choice doesn’t need this. To turn it on, add your own free key:</p>
+    ai: D.ui.aiKey && !aiEdit ? `      <div class="ai-done" role="status"><span class="ai-check" aria-hidden="true"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+        <div><b>Complete!</b><span>AI checking is on. Your written answers get checked before they count.</span></div></div>
+      ${(D.pending || []).length ? `<p class="set-note">${D.pending.length} earlier answer${D.pending.length>1?"s are":" is"} being checked.</p>` : ""}
+      <div class="set-row"><button class="linkish" id="aiChange">Change key</button><button class="linkish" id="aiRemove">Remove key</button></div>`
+    : `      ${aiGateTo ? `<p class="set-p"><b>One quick step before your first lesson.</b></p>` : ""}<p class="set-p">Written answers are checked by Google’s free Gemini AI before they count toward your progress. To turn it on, add your own free key:</p>
       <ol class="ai-steps"><li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and sign in with Google.</li><li>Tap <b>Create API key</b> and copy it.</li><li>Paste it below and tap Save.</li></ol>
       <form id="aiForm" class="set-col"><input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key" value="${esc(D.ui.aiKey || "")}" aria-label="Google AI key">
-        <div class="set-row"><button class="btn" type="submit">Save</button>${D.ui.aiKey ? `<button type="button" class="linkish" id="aiRemove">Remove key</button>` : ""}</div>
-        <p class="set-note" id="aiNote">${D.ui.aiKey ? "AI checking is on." : "Free, no card needed. Your key stays on this device and is only sent to Google."}${(D.pending || []).length ? ` ${D.pending.length} answer${D.pending.length>1?"s are":" is"} waiting to be checked.` : ""}</p></form>`,
+        <div class="set-row"><button class="btn" type="submit">Save</button></div>
+        <p class="set-note" id="aiNote">Free, no card needed. Your key stays on this device and is only sent to Google.</p></form>`,
     appearance: `      <p class="set-p">Choose how Intuish looks. Device follows your iPad or computer’s light and dark setting.</p>
       <div class="fp-row theme-row">${[["", "Device"], ["light", "Light"], ["dark", "Dark"]].map(([k, t]) => `<button class="fp-chip" data-theme-pick="${k}" aria-pressed="${(D.ui.theme || "") === k}">${t}</button>`).join("")}</div>`,
     install: page === "install" ? installPage() : "",
@@ -1758,7 +1768,9 @@ function openSettings(page){
     try {
       const t = await geminiDirect(key, {system:"Reply with the single word OK.", prompt:"Say OK."});
       if(!t) throw new Error("empty");
-      D.ui.aiKey = key; save(); note.textContent = "AI checking is on."; btn.disabled = false; checkPending(); regradeCurrent(); setTimeout(again, 900);
+      D.ui.aiKey = key; aiEdit = false; save(); btn.disabled = false; checkPending(); regradeCurrent();
+      if(aiGateTo){ const to = aiGateTo; aiGateTo = null; again(); setTimeout(() => { w.remove(); document.querySelectorAll(".sheet-wrap").forEach(n => n.remove()); location.hash = to; }, 1400); }
+      else again();
     } catch(e){ btn.disabled = false; const d = e.detail ? ` Google said: “${e.detail.slice(0, 160)}”` : "";
       note.textContent = /API key|API_KEY/i.test(e.detail || "") ? "That key didn’t work. Copy it again from AI Studio and paste the whole thing."
         : /403/.test(e.message) ? "Google turned this key down. In AI Studio, make sure the key’s project has the Gemini API turned on." + d
@@ -1768,7 +1780,8 @@ function openSettings(page){
         : e.message === "timeout" ? "Google took too long to answer. Try again."
         : "Google couldn’t answer right now (" + e.message + ")." + d; }
   };
-  if(q("#aiRemove")) q("#aiRemove").onclick = () => { delete D.ui.aiKey; save(); again(); };
+  if(q("#aiRemove")) q("#aiRemove").onclick = () => { delete D.ui.aiKey; delete D.ui.aiModel; aiEdit = false; save(); again(); };
+  if(q("#aiChange")) q("#aiChange").onclick = () => { aiEdit = true; again(); };
   if(q(".theme-row")) q(".theme-row").onclick = e => {
     const b = e.target.closest("[data-theme-pick]"); if(!b) return;
     D.ui.theme = b.dataset.themePick; save(); applyTheme();

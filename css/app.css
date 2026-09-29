@@ -549,3 +549,10 @@ body.in-study{background:radial-gradient(900px 500px at 10% 0%,rgba(12,104,218,.
 .ai-steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14.5px;color:var(--ink-2)}
 .ai-steps a{color:var(--note-tag)}
 #aiKey{font:inherit;font-size:15px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);color:var(--ink)}
+.ai-done{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:16px;background:var(--ok-soft);border:1.5px solid var(--ok)}
+.ai-done div{display:flex;flex-direction:column;gap:2px}
+.ai-done b{font-family:var(--display);font-size:20px;color:var(--ok-ink)}
+.ai-done span:not(.ai-check){font-size:14.5px;color:var(--ink-2)}
+.ai-check{flex:none;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:var(--ok);color:#fff;animation:aiDone .45s cubic-bezier(.2,.9,.3,1.3) both}
+@keyframes aiDone{from{transform:scale(.4);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.ai-check{animation:none}}
