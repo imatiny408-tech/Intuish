@@ -1207,6 +1207,15 @@ function header(){
 function render(){
   header();
   const v = LS(cur).view;
+  // Never fall back to generic "what was it about" questions: say the quiz isn't ready and offer to try again
+  if(cur && cur.custom && !cur.questions && !quizMaking.has(cur.id) && v !== "summary"){
+    body.innerHTML = `<div class="view"><div class="ai-v later">${aiReady() ? `Couldn’t write questions from this ${SRC_WORD[kindOf(cur)] || "lesson"} yet. Check your connection, then try again.` : `Turn on AI checking so Intuish can write questions from this ${SRC_WORD[kindOf(cur)] || "lesson"}.`}</div></div>`;
+    foot.innerHTML = `<span class="grow"></span>${aiReady() ? `<button class="btn" id="quizRetry">Try again</button>` : `<button class="btn" id="quizSetup">Turn on AI checking</button>`}`;
+    const L = cur, rb = $("#quizRetry"), sb = $("#quizSetup");
+    if(rb) rb.onclick = () => { makeQuiz(L).then(ok => { if(cur === L){ if(ok) newQ(); render(); ui(); } }); render(); };
+    if(sb) sb.onclick = () => openSettings("ai");
+    return;
+  }
   if(cur && quizMaking.has(cur.id) && v !== "summary"){ body.innerHTML = `<div class="view"><div class="ai-v checking"><span class="ai-dot"></span>Writing questions from this ${SRC_WORD[kindOf(cur)] || "lesson"}…</div></div>`; foot.innerHTML = ""; return; }
   { const st = LS(cur), n = itemsOf(cur).length; if(v === "q" && st.idx >= n){ st.idx = Math.max(0, n - 1); delete st.order; } }
   if(v === "summary") renderSummary(); else if(v === "review") renderReview(); else if(v === "break") renderBreak(); else renderQ();
