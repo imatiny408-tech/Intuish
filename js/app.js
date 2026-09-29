@@ -1122,7 +1122,22 @@ function optBtn(text, i, cls, checked, locked, missed){
    Multiple choice is checked by the app. Written answers go to an AI (through the Intuish server in js/config.js,
    which uses Google's Gemini with web search) and only count toward mastery once it has judged them. */
 const AI = window.INTUISH_AI || {url:""};
-const aiReady = () => !!AI.url;
+// Each person can add their own free Google AI key in Settings → AI checking (kept only on their device)
+const aiReady = () => !!(AI.url || (D.ui && D.ui.aiKey));
+const GEMINI_MODEL = "gemini-2.5-flash";
+async function geminiDirect(key, req){
+  const parts = []; if(req.video) parts.push({file_data:{file_uri:req.video}}); parts.push({text:req.prompt});
+  const body = {system_instruction:{parts:[{text:req.system}]}, contents:[{role:"user", parts}],
+    generationConfig:{temperature:0.2, maxOutputTokens:1500, thinkingConfig:{thinkingBudget:512}, mediaResolution:"MEDIA_RESOLUTION_LOW"}};
+  if(req.search) body.tools = [{google_search:{}}];
+  const call = bd => withTimeout(fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {method:"POST", headers:{"Content-Type":"application/json", "x-goog-api-key":key}, body:JSON.stringify(bd)}), 90000);
+  let r = await call(body);
+  // A video Gemini can't open (private or too long): grade from the text and a web search instead
+  if(!r.ok && parts.length > 1 && r.status !== 400 && r.status !== 403){ body.contents[0].parts = [parts[1]]; body.tools = [{google_search:{}}]; r = await call(body); }
+  if(!r.ok){ let msg = ""; try { msg = ((await r.json()).error || {}).message || ""; } catch(e){} const er = new Error("server " + r.status); er.detail = msg; throw er; }
+  const j = await r.json(), c = (j.candidates || [])[0] || {};
+  return ((c.content || {}).parts || []).map(x => x.text || "").join("");
+}
 const AI_SYSTEM = `You check a student's short written answer in a study app. Judge the meaning, not wording, grammar or spelling. Be fair and kind.
 Reply with only JSON, no other text: {"verdict":"right"|"partly"|"wrong","feedback":"one or two short sentences to the student, saying what was right and what was missing or off"}.
 right: accurate and covers the key idea. partly: on track but misses or muddles something important. wrong: incorrect, off topic, or empty.
@@ -1150,13 +1165,21 @@ async function aiGrade(e){
     hasModel ? `A strong answer: ${e.model}` : "", hasModel && e.look && e.look.length ? `A teacher would look for: ${e.look.join("; ")}` : "",
     `Student's answer: ${e.text}`].filter(Boolean).join("\n\n");
   const req = {system:AI_SYSTEM, prompt, video: !hasModel && vid ? `https://www.youtube.com/watch?v=${vid}` : null, search: !hasModel && !vid && !ex};
-  const r = await withTimeout(fetch(AI.url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(req)}), 90000);
-  if(!r.ok) throw new Error("server " + r.status);
-  const j = await r.json(), m = String(j.text || "").match(/\{[\s\S]*\}/);
+  let text;
+  if(D.ui.aiKey) text = await geminiDirect(D.ui.aiKey, req);
+  else { const r = await withTimeout(fetch(AI.url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(req)}), 90000); if(!r.ok) throw new Error("server " + r.status); text = (await r.json()).text; }
+  const m = String(text || "").match(/\{[\s\S]*\}/);
   if(!m) throw new Error("no verdict");
   const v = JSON.parse(m[0]);
   if(!["right", "partly", "wrong"].includes(v.verdict)) throw new Error("bad verdict");
   return {verdict:v.verdict, feedback:String(v.feedback || "").slice(0, 400)};
+}
+// The answer on screen is still waiting (AI was just turned on): check it now
+function regradeCurrent(){
+  const e = Qs && Qs.entry; if(!e || e.res || Qs.grade !== "later" || !aiReady()) return;
+  Qs.grade = "checking"; if(cur && LS(cur).view === "q") renderQ();
+  aiGrade(e).then(res => { e.res = res; if(Qs.entry === e){ Qs.grade = "done"; Qs.correct = res.verdict === "right"; if(!Qs.correct) Qs.review = true; if(LS(cur).view === "q") renderQ(); } else applyGrade(e); })
+    .catch(() => { if(Qs.entry === e){ Qs.grade = "later"; if(LS(cur).view === "q") renderQ(); } });
 }
 function startGrade(q){
   const st = LS(cur);
@@ -1191,7 +1214,7 @@ function openFeedback(q){
     if(Qs.grade === "checking") return `<div class="ai-v checking"><span class="ai-dot"></span>Checking your answer…</div>`;
     if(Qs.grade === "done" && Qs.entry && Qs.entry.res){ const r = Qs.entry.res, lab = {right:"Correct", partly:"Partly there", wrong:"Not quite"}[r.verdict];
       return `<div class="ai-v ${r.verdict}"><b>${lab}</b>${r.feedback ? `<span>${esc(r.feedback)}</span>` : ""}</div>`; }
-    return `<div class="ai-v later">${aiReady() ? "Couldn’t reach the AI checker right now." : "AI checking isn’t switched on yet."} Your answer is saved and will count once it’s checked.</div>`;
+    return `<div class="ai-v later">${aiReady() ? "Couldn’t reach the AI checker right now." : "AI checking isn’t on yet."} Your answer is saved and will count once it’s checked.${aiReady() ? "" : ` <button class="linkish" id="aiSetup">Turn on AI checking</button>`}</div>`;
   })();
   return `<div class="feedback${Qs.grade === "done" && Qs.entry && Qs.entry.res ? (Qs.entry.res.verdict === "right" ? " good" : Qs.entry.res.verdict === "wrong" ? " bad" : "") : ""}">${verdictBox}
     ${L.questions ? `<h3 style="font-size:15px;margin-top:6px">What a teacher would look for</h3><p>${esc(q.model)}</p>
@@ -1242,6 +1265,7 @@ function renderQ(){
   const on = (id, f) => { const n = document.getElementById(id); if(n) n.onclick = f; };
   on("explainBtn", () => { Qs.hint = true; renderQ(); });
   on("checkBtn", check); on("nextBtn", next);
+  on("aiSetup", () => openSettings("ai"));
   on("retryBtn", () => { Qs.phase = "answer"; Qs.selected = null; renderQ(); });
   on("revealBtn", () => { Qs.revealed = true; Qs.review = true; renderQ(); });
   on("flagBtn", () => { Qs.review = !Qs.review; renderQ(); });
@@ -1269,7 +1293,7 @@ function next(){
     const e = Qs.entry;
     if(q.noScore || !e){ st.answers[st.idx] = {skip:true, ms:Qs.ms}; ok = null; }
     else if(e.res){ ok = e.res.verdict === "right"; st.answers[st.idx] = {correct:ok, ms:Qs.ms, ai:e.res.verdict}; recordAnswer(e.id, ok, e.ms, false, {src:"ai", hint:Qs.hint}); }
-    else { st.answers[st.idx] = {pending:true, ms:Qs.ms}; e.pos = st.idx; D.pending = (D.pending || []).filter(x => x.id !== e.id).concat([e]); ok = null; }
+    else { st.answers[st.idx] = {pending:true, ms:Qs.ms}; e.pos = st.idx; D.pending = (D.pending || []).filter(x => x.id !== e.id).concat([e]); ok = null; if(!e.failed || aiReady()) setTimeout(checkPending, 800); }
   } else {
     st.answers[st.idx] = {correct:firstTry, ms:Qs.ms, attempts:Qs.attempts, changed:Qs.changes>0, hint:Qs.hint, review:Qs.review, conf:Qs.conf};
     recordAnswer(qid(cur, RI(st, st.idx)), ok, Qs.ms, !!q.options, {attempts:Qs.attempts, changed:Qs.changes>0, hint:Qs.hint, src:"lesson", conf:Qs.conf || undefined});
@@ -1631,6 +1655,7 @@ const SET_PAGES = [
   ["profile", "Profile", "Name and photo"],
   ["photos", "Subject photos", "Change the picture for each subject"],
   ["account", "Account", AUTH ? "Email sign-up" : "Email sign-in coming soon"],
+  ["ai", "AI checking", "Checks your written answers"],
   ["appearance", "Appearance", "Light, dark, or match your device"],
   ["fonts", "Fonts", "Choose the font for each part of the app"],
   ["notes", "Notes", "Your notes from the last 30 days"],
@@ -1640,7 +1665,7 @@ const SET_PAGES = [
 function openSettings(page){
   if(page === "notes"){ openNotes(true); return; }
   const pr = D.profile, signed = !!(pr.session && pr.email);
-  const ICO = {appearance:'<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>', profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>', photos:'<rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/>', account:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 7l9 6 9-6"/>', fonts:'<path d="M4 20l6-16h1l6 16M6.5 14h8"/><path d="M17 20h4"/>', install:'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M12 7v7M9 11l3 3 3-3M10 18h4"/>', notes:'<path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/>', data:'<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>'};
+  const ICO = {ai:'<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/>', appearance:'<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>', profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>', photos:'<rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/>', account:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 7l9 6 9-6"/>', fonts:'<path d="M4 20l6-16h1l6 16M6.5 14h8"/><path d="M17 20h4"/>', install:'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M12 7v7M9 11l3 3 3-3M10 18h4"/>', notes:'<path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/>', data:'<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>'};
   const icon = k => `<span class="set-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICO[k]}</svg></span>`;
   const PAGES = {
     profile: `      <div class="set-profile"><button class="avatar big ${pr.photo ? "has-photo" : ""}" id="setPhoto" aria-label="Change profile photo">${avatarInner(pr)}</button>
@@ -1654,6 +1679,11 @@ function openSettings(page){
         <form id="signForm" class="set-inline"><input id="signEmail" type="email" required placeholder="you@example.com" value="${esc(pr.email)}" autocomplete="email"><button class="btn" type="submit">Send link</button></form>
         <p class="set-note" id="signNote"></p>`}`,
     fonts: page === "fonts" ? fontsPage() : "",
+    ai: `      <p class="set-p">Written answers are checked by Google’s free Gemini AI before they count toward your progress. Multiple choice doesn’t need this. To turn it on, add your own free key:</p>
+      <ol class="ai-steps"><li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and sign in with Google.</li><li>Tap <b>Create API key</b> and copy it.</li><li>Paste it below and tap Save.</li></ol>
+      <form id="aiForm" class="set-col"><input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key (starts with AIza)" value="${esc(D.ui.aiKey || "")}" aria-label="Google AI key">
+        <div class="set-row"><button class="btn" type="submit">Save</button>${D.ui.aiKey ? `<button type="button" class="linkish" id="aiRemove">Remove key</button>` : ""}</div>
+        <p class="set-note" id="aiNote">${D.ui.aiKey ? "AI checking is on." : "Free, no card needed. Your key stays on this device and is only sent to Google."}${(D.pending || []).length ? ` ${D.pending.length} answer${D.pending.length>1?"s are":" is"} waiting to be checked.` : ""}</p></form>`,
     appearance: `      <p class="set-p">Choose how Intuish looks. Device follows your iPad or computer’s light and dark setting.</p>
       <div class="fp-row theme-row">${[["", "Device"], ["light", "Light"], ["dark", "Dark"]].map(([k, t]) => `<button class="fp-chip" data-theme-pick="${k}" aria-pressed="${(D.ui.theme || "") === k}">${t}</button>`).join("")}</div>`,
     install: page === "install" ? installPage() : "",
@@ -1683,6 +1713,18 @@ function openSettings(page){
     try { await sendLink(email); note.textContent = `Check ${email} for a link to finish signing up.`; }
     catch(e){ note.textContent = e.message === "offline" ? "Email sign-in is coming soon, so no link was sent yet. We saved your email on this device." : "The link couldn’t be sent. Check the email and try again."; }
   };
+  if(q("#aiForm")) q("#aiForm").onsubmit = async ev => {
+    ev.preventDefault();
+    const key = q("#aiKey").value.trim(), note = q("#aiNote"), btn = q("#aiForm .btn");
+    if(!key){ note.textContent = "Paste your key first."; return; }
+    btn.disabled = true; note.textContent = "Checking your key…";
+    try {
+      const t = await geminiDirect(key, {system:"Reply with the single word OK.", prompt:"Say OK."});
+      if(!t) throw new Error("empty");
+      D.ui.aiKey = key; save(); note.textContent = "AI checking is on."; btn.disabled = false; checkPending(); regradeCurrent(); setTimeout(again, 900);
+    } catch(e){ btn.disabled = false; note.textContent = /400|403/.test(e.message) ? "That key didn’t work. Copy it again from AI Studio and paste the whole thing." : /429/.test(e.message) ? "Google says this key is busy. Wait a minute and try again." : "Couldn’t reach Google. Check your connection and try again."; }
+  };
+  if(q("#aiRemove")) q("#aiRemove").onclick = () => { delete D.ui.aiKey; save(); again(); };
   if(q(".theme-row")) q(".theme-row").onclick = e => {
     const b = e.target.closest("[data-theme-pick]"); if(!b) return;
     D.ui.theme = b.dataset.themePick; save(); applyTheme();

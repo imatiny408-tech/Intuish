@@ -546,3 +546,6 @@ body.in-study{background:radial-gradient(900px 500px at 10% 0%,rgba(12,104,218,.
 .ai-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);animation:aiPulse 1s ease-in-out infinite alternate}
 @keyframes aiPulse{from{opacity:.3;transform:scale(.8)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.ai-dot{animation:none}}
+.ai-steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14.5px;color:var(--ink-2)}
+.ai-steps a{color:var(--note-tag)}
+#aiKey{font:inherit;font-size:15px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);color:var(--ink)}
