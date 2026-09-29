@@ -692,13 +692,20 @@ async function sortSources(subjId, onDone, onProgress){
   save();
   const moves = sortPlan(subjId);
   moves.forEach(m => m.L.topic = m.to);
-  const left = waiting.filter(L => !moves.some(m => m.L === L)).map(L => L.id);
-  D._lastSort = {subj:subjId, read:waiting.length - unread.length, total:waiting.length, unread, left, moves:moves.map(m => ({id:m.L.id, from:m.from}))};
+  let rest = waiting.filter(L => !moves.some(m => m.L === L)), made = [], aiUsed = false, aiFailed = false;
+  if(rest.length && aiReady()){
+    onProgress && onProgress(-1, rest.length);
+    try { const r = await aiSortLeftovers(subjId, rest); r.moves.forEach(m => { m.L.topic = m.to; moves.push(m); }); made = r.made; aiUsed = true; rest = rest.filter(L => !r.moves.some(m => m.L === L)); }
+    catch(e){ aiFailed = true; }
+  }
+  const left = rest.map(L => L.id);
+  D._lastSort = {subj:subjId, read:waiting.length - unread.length, total:waiting.length, unread, left, made, aiUsed, aiFailed, moves:moves.map(m => ({id:m.L.id, from:m.from}))};
   save(); onDone && onDone(moves.length, left.length);
 }
 function undoSort(onDone){
   const u = D._lastSort; if(!u) return;
   u.moves.forEach(m => { const L = lessonById(m.id); if(L) L.topic = m.from; });
+  if(u.made && u.made.length) D.extraTopics[u.subj] = (D.extraTopics[u.subj] || []).filter(t => !u.made.includes(t));
   delete D._lastSort; save(); onDone && onDone();
 }
 function openSubject(id, keepTopic){
@@ -720,10 +727,11 @@ function openSubject(id, keepTopic){
       if(last){
         const left = (last.left || []).map(lessonById).filter(L => L && L.topic === MY);
         const unread = (last.unread || []).length;
-        return `<div class="sort-bar"><span>${last.total != null ? `Read ${last.read} of ${last.total} source${last.total>1?"s":""}. ` : ""}${last.moves.length ? `Loaded ${last.moves.length} lesson${last.moves.length>1?"s":""} into your subcategories.` : "None of them clearly matched a subcategory."}${unread ? ` ${unread} couldn’t be opened, so only the name was used.` : ""}</span><button class="linkish" id="undoSort" ${last.moves.length ? "" : "hidden"}>Undo</button><button class="linkish" id="okSort">Done</button>
-          ${left.length ? `<div class="sort-left"><span class="muted">${left.length === 1 ? "This one didn’t clearly fit. Choose where it goes:" : "These didn’t clearly fit. Choose where each one goes:"}</span>${left.map(L => `<label class="sort-row"><span class="tr-ico">${KIND[kindOf(L)].icon}</span><b>${esc(L.title)}</b><select data-file="${L.id}" aria-label="Subcategory for ${esc(L.title)}"><option value="">My sources</option>${topics.filter(t => t !== MY).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>`).join("")}</div>` : ""}</div>`;
+        return `<div class="sort-bar"><span>${last.total != null ? `Read ${last.read} of ${last.total} source${last.total>1?"s":""}. ` : ""}${last.moves.length ? `Loaded ${last.moves.length} lesson${last.moves.length>1?"s":""} into your subcategories.` : "None of them clearly matched a subcategory."}${last.made && last.made.length ? ` New subcategor${last.made.length>1?"ies":"y"}: ${last.made.map(esc).join(", ")}.` : ""}${unread ? ` ${unread} couldn’t be opened, so only the name was used.` : ""}</span><button class="linkish" id="undoSort" ${last.moves.length ? "" : "hidden"}>Undo</button><button class="linkish" id="okSort">Done</button>
+          ${left.length && aiReady() ? `<button class="act h-primary" id="doSort">Sort the rest with AI</button>` : ""}
+          ${left.length ? `<div class="sort-left"><span class="muted">${last.aiFailed ? "The AI couldn’t be reached, so these are still in My sources. Tap Load lessons again later, or choose where they go:" : !aiReady() ? "Turn on AI checking in Settings so these can be sorted for you, or choose where they go:" : "The AI couldn’t tell where these belong. Choose where they go:"}</span>${left.map(L => `<label class="sort-row"><span class="tr-ico">${KIND[kindOf(L)].icon}</span><b>${esc(L.title)}</b><select data-file="${L.id}" aria-label="Subcategory for ${esc(L.title)}"><option value="">My sources</option>${topics.filter(t => t !== MY).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>`).join("")}</div>` : ""}</div>`;
       }
-      return waiting && others ? `<div class="sort-bar"><span>${waiting} source${waiting>1?"s are":" is"} waiting in My sources. Load lessons reads each one (video titles, website pages and PDF text) and puts it in the subcategory it fits.</span><button class="act h-primary" id="doSort">Load lessons</button></div>` : ""; })()}
+      return waiting && (others || aiReady()) ? `<div class="sort-bar"><span>${waiting} source${waiting>1?"s are":" is"} waiting in My sources. Load lessons reads each one (video titles, website pages and PDF text) and puts it in the subcategory it fits.</span><button class="act h-primary" id="doSort">Load lessons</button></div>` : ""; })()}
     <div id="detail"></div>
     ${starter.length ? `<div class="sec-h" style="margin-top:0"><h3 style="font-size:17px">Starter pack <span class="muted" style="font-weight:600;font-size:14px">${starter.filter(l => kindOf(l)==="video").length} videos · ${starter.filter(l => kindOf(l)==="pdf").length} PDFs · ${starter.filter(l => kindOf(l)==="link").length} websites</span></h3></div>
     <div class="lessons">${starter.map(lessonCard).join("")}</div>` : ""}
@@ -762,7 +770,7 @@ function openSubject(id, keepTopic){
     if(e.target.closest("[data-add-topic]")) return addSourceSheet(id, topics[picked], () => { renderHome(); reopen(); });
     if(e.target.closest("#addSub")) return addSubcategory(id, i => { picked = i; renderHome(); reopen(); });
     if(e.target.closest("[data-del-topic]")){ D.extraTopics[id] = (D.extraTopics[id]||[]).filter(t => t !== topics[picked]); picked = null; save(); renderHome(); return reopen(); }
-    if(e.target.closest("#doSort")){ const b = e.target.closest("#doSort"); b.disabled = true; b.textContent = "Reading sources…"; return sortSources(id, () => { renderHome(); if(w.isConnected) reopen(); }, (n, t) => { b.textContent = `Reading ${Math.min(n + 1, t)} of ${t}…`; }); }
+    if(e.target.closest("#doSort")){ const b = e.target.closest("#doSort"); b.disabled = true; b.textContent = "Reading sources…"; return sortSources(id, () => { renderHome(); if(w.isConnected) reopen(); }, (n, t) => { b.textContent = n < 0 ? `Asking the AI about ${t} more…` : `Reading ${Math.min(n + 1, t)} of ${t}…`; }); }
     if(e.target.closest("#undoSort")) return undoSort(() => { renderHome(); reopen(); toast("Put back in My sources"); });
     if(e.target.closest("#okSort")){ delete D._lastSort; save(); return reopen(); }
     if(e.target.closest("#delSubj")) return deleteSubject(s, w);
@@ -1188,6 +1196,48 @@ async function sourceExcerpt(L){
   if(text){ D.meta["src:" + L.id] = Object.assign(m, {ex:text, kw:m.kw || topWords(text, 60)}); save(); }
   return text;
 }
+// One AI request: the person's own key, or the Intuish server if one is set in config.js
+async function aiAsk(req){
+  if(!aiReady()) throw new Error("off");
+  if(D.ui.aiKey) return geminiDirect(D.ui.aiKey, req);
+  const r = await withTimeout(fetch(AI.url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(req)}), 90000);
+  if(!r.ok) throw new Error("server " + r.status); return (await r.json()).text;
+}
+const parseJSON = (t, open) => { const m = String(t || "").match(open === "[" ? /\[[\s\S]*\]/ : /\{[\s\S]*\}/); if(!m) return null; try { return JSON.parse(m[0]); } catch(e){ return null; } };
+// Sources the word match couldn't place: the AI reads their titles and text, watches videos when the title isn't enough,
+// and files each one in a subcategory, making a new one when nothing fits
+const SORT_SYSTEM = `You organize study sources into subcategories for a study app. Use each source's title, channel, link, text and (for videos) what the video teaches.
+Put each source in the existing subcategory it fits best. Only if none fits, make a new subcategory; name it in the app's style: a short learning phrase starting with an -ing verb, like "Learning Website Layout" or "Designing With AI". Reuse one new name for similar sources and make as few new ones as possible. Never use "My sources".
+Reply with only JSON.`;
+async function aiSortLeftovers(subjId, left){
+  const s = subjById(subjId), topics = topicsOf(s).filter(t => t !== MY);
+  const goalFor = t => (D.goals[subjId] || []).filter(g => topicName(g) === t)[0] || "";
+  const info = L => { const v = kindOf(L) === "video" ? videoOf(L) : null, m = (v && D.meta[v]) || {}, sm = D.meta["src:" + L.id] || {};
+    return {kind:kindOf(L), title:m.title || L.title, channel:m.author || "", link:L.url || (v ? `https://www.youtube.com/watch?v=${v}` : ""), file:L.file || "", text:(sm.ex || sm.kw || "").slice(0, 700)}; };
+  const list = left.map((L, i) => Object.assign({i}, info(L)));
+  const intro = `Subject: ${s.name}\nSubcategories:\n${topics.map(t => `- ${t}${goalFor(t) ? ` (goal: ${goalFor(t)})` : ""}`).join("\n") || "(none yet)"}`;
+  const out = new Map();
+  const batch = parseJSON(await aiAsk({system:SORT_SYSTEM, prompt:`${intro}\n\nSources:\n${JSON.stringify(list)}\n\nReply as a JSON array: [{"i":0,"to":"subcategory name","sure":true}]. Set sure to false when the title and text aren't enough to tell what it teaches.`}), "[") || [];
+  batch.forEach(x => { if(x && left[x.i] && x.to) out.set(left[x.i], {to:String(x.to).trim(), sure:x.sure !== false}); });
+  // Not sure (or missing) videos: let the AI watch the video itself
+  const watch = left.filter(L => kindOf(L) === "video" && (!out.has(L) || !out.get(L).sure)).slice(0, 8);
+  for(const L of watch){
+    const known = [...new Set(topics.concat([...out.values()].map(x => x.to)))];
+    try {
+      const one = parseJSON(await aiAsk({system:SORT_SYSTEM, video:info(L).link, prompt:`${intro}\nNew subcategories made so far: ${known.filter(t => !topics.includes(t)).join(", ") || "none"}\n\nWatch this video ("${info(L).title}") and decide where it goes. Reply as JSON: {"to":"subcategory name"}`}), "{");
+      if(one && one.to) out.set(L, {to:String(one.to).trim(), sure:true});
+    } catch(e){ if(/403|429|off/.test(e.message)) break; }
+  }
+  const moves = [], made = [];
+  out.forEach((x, L) => {
+    let to = x.to.replace(/^["'\s]+|["'\s.]+$/g, "").slice(0, 48);
+    if(!to || to.toLowerCase() === MY.toLowerCase()) return;
+    const hit = topicsOf(s).find(t => t.toLowerCase() === to.toLowerCase()); if(hit) to = hit;
+    else { D.extraTopics[subjId] = (D.extraTopics[subjId] || []).concat([to]); made.push(to); }
+    moves.push({L, from:L.topic, to});
+  });
+  return {moves, made};
+}
 async function aiGrade(e){
   if(!aiReady()) throw new Error("off");
   if(!navigator.onLine) throw new Error("offline");
@@ -1202,9 +1252,7 @@ async function aiGrade(e){
     hasModel ? `A strong answer: ${e.model}` : "", hasModel && e.look && e.look.length ? `A teacher would look for: ${e.look.join("; ")}` : "",
     `Student's answer: ${e.text}`].filter(Boolean).join("\n\n");
   const req = {system:AI_SYSTEM, prompt, video: !hasModel && vid ? `https://www.youtube.com/watch?v=${vid}` : null, search: !hasModel && !vid && !ex};
-  let text;
-  if(D.ui.aiKey) text = await geminiDirect(D.ui.aiKey, req);
-  else { const r = await withTimeout(fetch(AI.url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(req)}), 90000); if(!r.ok) throw new Error("server " + r.status); text = (await r.json()).text; }
+  const text = await aiAsk(req);
   const m = String(text || "").match(/\{[\s\S]*\}/);
   if(!m) throw new Error("no verdict");
   const v = JSON.parse(m[0]);
