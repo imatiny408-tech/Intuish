@@ -170,6 +170,65 @@ function globe(st, p, key){
     <circle cx="46" cy="46" r="44" fill="none" stroke-width="2" ${border}/>
   </svg>`;
 }
+/* ---------- Subcategory covers ----------
+   Once a subcategory has a lesson in it, its circle gets an illustrated cover picked from what the lessons are about
+   (the subcategory name + lesson titles), drawn in the subject's colors. Empty subcategories stay a plain circle. */
+const COVER_TINT = {acting:["#8B1E2B","#FCE4E1","#F6C343"], hiset:["#2E6FD8","#DCE9FB","#F6B73C"], anatomy:["#C0263A","#FCE4E4","#3E7FD6"],
+  psych:["#7A4FC2","#ECE3FA","#F4A6C4"], spanish:["#D7263D","#FFE7B3","#1B998B"], music:["#0F5C63","#DDF1EE","#F6C343"]};
+// [keywords, icon drawn on a 24x24 grid with round strokes]; first match wins, so specific words come first
+const COVER_ICONS = [
+  [/repetit|repeat|echo/, '<path d="M4 6h9a3 3 0 0 1 3 3v1H7l-3 3z"/><path d="M20 12h-8a3 3 0 0 0-3 3v1h8l3 3z"/>'],
+  [/magic|imagin|what if|pretend/, '<path d="M5 19 16 8"/><path d="m14 6 4 4"/><path d="M18 3v2M21 6h-2M19.5 4.5l-1 1M9 4v2M8 5h2M20 14v2M19 15h2"/>'],
+  [/hagen|object|substitut/, '<rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.4"/>'],
+  [/character|role|mask|theat|stage|scene|truthful|natural/, '<path d="M4 5c3 1.3 6 1.3 9 0v6a4.5 4.5 0 0 1-9 0z"/><path d="M11 9c3 1.3 6 1.3 9 0v6a4.5 4.5 0 0 1-9 0"/><path d="M6.5 9.5h1M9.5 9.5h1M13.5 13.5h1M16.5 13.5h1M14 17c1-.8 2.5-.8 3.5 0"/>'],
+  [/audition|self.?tape|camera|film|on camera/, '<rect x="3" y="7" width="13" height="10" rx="2"/><path d="m16 11 5-3v8l-5-3"/>'],
+  [/voice|speak|pronounc|sing|vocal/, '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/>'],
+  [/nerve|anxiet|confiden|calm|stress/, '<path d="m12 3 2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/>'],
+  [/lines|memoriz|script|monolog/, '<path d="M7 3h10v18l-5-3-5 3z"/><path d="M10 8h4M10 11h4"/>'],
+  [/dialogue|writ|essay|story|screen/, '<path d="M4 20l1.2-4.2L16 5l3 3L8.2 18.8z"/><path d="m14 7 3 3"/>'],
+  [/pitch|producer|sell|market/, '<path d="M4 10v4h3l7 4V6L7 10z"/><path d="M17.5 9.5a4 4 0 0 1 0 5"/>'],
+  [/equation|algebra|linear|solve|math|formula/, '<path d="M4 7h6M7 4v6M14 7h6M4 17h6M14 15h6M14 19h6"/>'],
+  [/main idea|reading(?! note)|passage|comprehen|book/, '<path d="M3 5.5c3-1.3 6-1.3 9 .5v14c-3-1.8-6-1.8-9-.5z"/><path d="M21 5.5c-3-1.3-6-1.3-9 .5v14c3-1.8 6-1.8 9-.5z"/>'],
+  [/govern|civic|constitu|law|branch|history|social stud/, '<path d="M3 10 12 4l9 6z"/><path d="M5 10v8M9.7 10v8M14.3 10v8M19 10v8M3 20h18"/>'],
+  [/heart|cardi|blood|pulse/, '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/><path d="M6 12h3l1.5-2.5L13 15l1.5-3H18"/>'],
+  [/skelet|bone|skull|joint/, '<path d="M8 8.5 15.5 16"/><circle cx="6.8" cy="5.3" r="1.8"/><circle cx="5.3" cy="7.3" r="1.8"/><circle cx="18.7" cy="16.7" r="1.8"/><circle cx="16.7" cy="18.7" r="1.8"/>'],
+  [/lung|respir|breath|oxygen/, '<path d="M12 4v8M12 10l-3 2M12 10l3 2"/><path d="M9 8C5 8 4 13 4 17c0 2 1.5 3 3 3 2 0 2-2 2-4z"/><path d="M15 8c4 0 5 5 5 9 0 2-1.5 3-3 3-2 0-2-2-2-4z"/>'],
+  [/mental|mind|emotion|feeling|mood|therapy/, '<path d="M12 20s-6-3.8-6-8.3A3.6 3.6 0 0 1 12 9.5a3.6 3.6 0 0 1 6 2.2c0 4.5-6 8.3-6 8.3z"/><path d="M9 5.5c1-1 2-1.5 3-1.5s2 .5 3 1.5"/>'],
+  [/memor|brain|recall|remember|longer|forget/, '<path d="M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 3 4.5 3 3 0 0 0 5 .5V5.5a3 3 0 0 0-3-1z"/><path d="M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-3 4.5 3 3 0 0 1-5 .5"/><path d="M8 10h2M14 13h2"/>'],
+  [/develop|piaget|child|grow|stage of/, '<path d="M12 21v-9"/><path d="M12 12c0-4 3-6 7-6 0 4-3 6-7 6zM12 14c0-3-2.5-5-6-5 0 3 2.5 5 6 5z"/>'],
+  [/social|people|group|conform|friend|relationship|socializ/, '<circle cx="9" cy="8" r="3"/><circle cx="17" cy="9.5" r="2.4"/><path d="M3.5 19c.8-3.4 3-5 5.5-5s4.7 1.6 5.5 5M14.5 14.6c.8-.4 1.6-.6 2.5-.6 2 0 3.6 1.3 4 4"/>'],
+  [/greet|hello|hola|introduc|convers/, '<path d="M4 5h16v10H9l-5 4z"/><path d="M8 10h.01M12 10h.01M16 10h.01"/>'],
+  [/tense|verb|conjug|past|future|present|time/, '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>'],
+  [/number|count|numer|digit/, '<path d="M5 8l2-1.5V17M10 9.5a2 2 0 0 1 4 0c0 2-4 3.5-4 7.5h4M17 7.5h3l-2 3a2.2 2.2 0 1 1-1.8 3.8"/>'],
+  [/rhythm|beat|tempo|drum|time signature/, '<path d="M8 20 11 4h2l3 16z"/><path d="M9.6 13.5h4.8M12 13.5l4-6"/>'],
+  [/scale|chord|key|interval|harmon/, '<path d="M4 20h4v-4h4v-4h4V8h4"/><circle cx="6" cy="14" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="14" cy="6" r="1.2"/>'],
+  [/note|staff|clef|music|melod|song/, '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>'],
+  [/test|exam|class|quiz|grade|pass/, '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3.5h6v2H9zM8.5 11l1.5 1.5 3-3M8.5 16.5h7"/>'],
+  [/every day|daily|habit|practic|routine|little/, '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4M9 15l2 2 4-4"/>'],
+  [/real life|world|everyday|travel|use /, '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.4 2.6 14.6 0 17M12 3.5c-2.6 2.4-2.6 14.6 0 17"/>'],
+  [/word|vocab|key idea|term|definit|language/, '<path d="M4 18 8.5 6 13 18M5.7 14h5.6M15 10.5c.6-1 1.6-1.5 2.7-1.5 1.7 0 2.8 1 2.8 2.8V18M20.5 13.5c-3.5 0-5.5.6-5.5 2.5 0 1.2.9 2 2.2 2 1.8 0 3.3-1.4 3.3-3.4"/>'],
+  [/basic|intro|begin|fundament|understand|learn/, '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1 2V16h5.2v-.2c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/>']
+];
+function coverFor(s, topic, lessons, st, pct, key){
+  const custom = PALETTE[(s.color|0) % PALETTE.length];
+  const [ink, tint, accent] = COVER_TINT[s.id] || [custom[0], custom[1], "#F6C343"];
+  // The subcategory's own name decides first; lesson titles only help when the name says nothing recognizable
+  const name = topic.toLowerCase(), titles = lessons.map(l => l.title || "").join(" ").toLowerCase();
+  const hit = COVER_ICONS.find(([re]) => re.test(name)) || COVER_ICONS.find(([re]) => re.test(titles));
+  const glyph = hit ? `<g transform="translate(22 22) scale(2)" fill="none" stroke="${ink}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${hit[1]}</g>`
+    : `<text x="46" y="58" text-anchor="middle" font-size="34" font-weight="700" fill="${ink}" font-family="inherit">${esc((topic.trim()[0]||"?").toUpperCase())}</text>`;
+  // Mastery shows as a ring around the cover (review items get the dashed coral ring, like everywhere else)
+  const c = 2*Math.PI*44, ringCol = st==="s"?"var(--st-s)":st==="l"?"var(--st-l)":"var(--st-r)";
+  const ring = st === "n" ? "" : st === "r" && !pct ? `<circle cx="46" cy="46" r="44" fill="none" stroke="var(--st-r)" stroke-width="3" stroke-dasharray="5 5"/>`
+    : `<circle cx="46" cy="46" r="44" fill="none" stroke="${ringCol}" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="${c*Math.max(pct,4)/100} ${c}" transform="rotate(-90 46 46)"/>`;
+  return `<svg class="globe cover" viewBox="0 0 92 92" aria-hidden="true">
+    <defs><radialGradient id="cg${key}" cx="35%" cy="28%" r="80%"><stop offset="0" stop-color="#fff"/><stop offset=".55" stop-color="${tint}"/><stop offset="1" stop-color="${tint}"/></radialGradient></defs>
+    <circle cx="46" cy="46" r="44" fill="url(#cg${key})"/>
+    <circle cx="70" cy="22" r="4" fill="${accent}" opacity=".85"/><circle cx="20" cy="70" r="2.5" fill="${ink}" opacity=".18"/><circle cx="74" cy="66" r="2" fill="${ink}" opacity=".14"/>
+    ${glyph}
+    <circle cx="46" cy="46" r="44" fill="none" stroke="${ink}" stroke-opacity=".12" stroke-width="1.5"/>${ring}
+  </svg>`;
+}
 function thumbImg(L){
   return `<span class="fallback">${ART[L.subj]||""}</span><img src="${thumb(videoOf(L))}" alt="" loading="lazy" onerror="this.remove()">`;
 }
@@ -277,7 +336,7 @@ $("#avatarBtn").onclick = e => {
   e.stopPropagation();
   menu($("#avatarBtn"), [["about","About this test version"],"hr",["reset","Erase all my progress"]], a => {
     if(a === "about") sheet(`<div class="sheet-head"><div><div class="eyebrow">Intuish</div><h2>Test version</h2></div><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
-      <p class="lead" style="margin:0">Your progress is saved in this browser only. Nothing is sent anywhere. Each subject comes with three starter lessons. Add up to 50 of your own sources (YouTube videos, websites, PDFs) to any subject. PDFs stay on this device.</p>
+      <p class="lead" style="margin:0">Your progress is saved in this browser only. Nothing is sent anywhere. Each subject comes with three starter lessons. Add your own sources to any subject: up to 50 YouTube videos, 25 websites and 25 PDFs. PDFs stay on this device.</p>
       <p class="muted" style="margin:0;font-size:13px">Hints are written by hand for now, not AI.</p>
       <div style="display:flex;justify-content:flex-end"><button class="btn" data-close data-focus>Got it</button></div>`);
     if(a === "reset"){
@@ -289,8 +348,12 @@ $("#avatarBtn").onclick = e => {
   });
 };
 
-/* ----- Sources: your own videos, links and PDFs (max 50 per subject) ----- */
-const MAX_SOURCES = 50, MY = "My sources";
+/* ----- Sources: your own videos, links and PDFs. Each kind has its own limit per subject ----- */
+const LIMITS = {video:50, link:25, pdf:25}, MY = "My sources";
+const LIMIT_NAME = {video:["video","videos"], link:["website","websites"], pdf:["PDF","PDFs"]};
+const countKinds = subjId => { const c = {video:0, link:0, pdf:0}; sourcesOf(subjId).forEach(L => { const k = kindOf(L); if(k in c) c[k]++; }); return c; };
+const allFull = c => Object.keys(LIMITS).every(k => c[k] >= LIMITS[k]);
+const limitLine = c => Object.keys(LIMITS).map(k => `${c[k]} of ${LIMITS[k]} ${LIMIT_NAME[k][1]}`).join(" · ");
 const kindOf = L => L.kind || "video";
 const topicsOf = s => { const base = s.topics.concat(D.extraTopics[s.id] || []); const extra = [...new Set(D.custom.filter(l => l.subj === s.id && !base.includes(l.topic)).map(l => l.topic))].sort((a,b) => (a === MY) - (b === MY)); return base.concat(extra); };
 const sourcesOf = id => D.custom.filter(l => l.subj === id);
@@ -312,11 +375,11 @@ const PDFS = {
 };
 
 function addSourceSheet(subjId, topic, onDone){
-  const s = subjById(subjId), n = sourcesOf(subjId).length;
-  if(n >= MAX_SOURCES){ toast(`You’ve reached ${MAX_SOURCES} sources for ${s.name}. Remove one to add more.`); return; }
+  const s = subjById(subjId), cnt = countKinds(subjId);
+  if(allFull(cnt)){ toast(`${s.name} is full. Remove a source to add more.`); return; }
   const opts = [...new Set(topicsOf(s).concat([MY]))].map(t => `<option ${t === (topic || MY) ? "selected" : ""}>${esc(t)}</option>`).join("");
   const w = sheet(`
-    <div class="sheet-head"><div><div class="eyebrow">${esc(s.name)} · ${n} of ${MAX_SOURCES} sources</div><h2>Add a source</h2></div><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
+    <div class="sheet-head"><div><div class="eyebrow">${esc(s.name)}</div><h2>Add a source</h2></div><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
     <form id="srcForm" class="src-form">
       <label class="label" for="srcUrl">YouTube video or website link</label>
       <input id="srcUrl" type="url" inputmode="url" placeholder="https://…" autocomplete="off" data-focus>
@@ -326,6 +389,7 @@ function addSourceSheet(subjId, topic, onDone){
       <input id="srcName" type="text" placeholder="What is this about?" autocomplete="off">
       <label class="label" for="srcTopic">Topic</label>
       <select id="srcTopic">${opts}</select>
+      <p class="muted src-limits">${limitLine(cnt)}</p>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px"><button type="button" class="btn outline" data-close>Cancel</button><button class="btn" type="submit">Add</button></div>
     </form>`);
   const pdf = w.querySelector("#srcPdf");
@@ -346,6 +410,7 @@ function addSourceSheet(subjId, topic, onDone){
       else { toast("That doesn’t look like a link"); return; }
       if(v && !name) L.autoTitle = true;
     } else { toast("Paste a link or choose a PDF"); return; }
+    if(cnt[L.kind] >= LIMITS[L.kind]){ if(L.kind === "pdf") PDFS.del(L.id).catch(()=>{}); toast(`You’ve reached ${LIMITS[L.kind]} ${LIMIT_NAME[L.kind][1]} for ${s.name}. Remove one to add another.`); return; }
     D.custom.push(L); save(); w.remove(); toast(`${KIND[L.kind].label} added`); onDone && onDone(L);
   };
 }
@@ -502,13 +567,13 @@ function openSubject(id, keepTopic){
     </div>
     ${(D.goals[id]||[]).length ? `<div class="goal-chips"><span class="label">Your goals</span>${D.goals[id].map(g => `<span class="goal-chip">${esc(g)}</span>`).join("")}<button class="linkish" id="editGoals">Edit</button></div>` : `<div class="goal-chips"><button class="linkish" id="editGoals">Set your goals for ${esc(s.name)}</button></div>`}
     <div style="display:flex;align-items:center;gap:16px">${ring(ss.pct,84,8)}<div class="segs" style="flex:1">${tStats.map(x => `<i class="${x.st}" style="height:12px;border-radius:6px"></i>`).join("")}</div></div>
-    <div class="orbs">${topics.map((t,i) => { const x = tStats[i]; return `<button class="orb" data-i="${i}" aria-pressed="false">${globe(x.st, x.pct, s.id+i)}<b>${esc(t)}</b><small>${x.seen ? x.pct+"%" : !x.lessons.length ? "Empty" : x.lessons.length > 1 ? x.lessons.length + " lessons" : "New"}</small></button>`; }).join("")}
+    <div class="orbs">${topics.map((t,i) => { const x = tStats[i]; return `<button class="orb" data-i="${i}" aria-pressed="false">${x.lessons.length ? coverFor(s, t, x.lessons, x.st, x.pct, s.id+i) : globe(x.st, x.pct, s.id+i)}<b>${esc(t)}</b><small>${x.seen ? x.pct+"%" : !x.lessons.length ? "Empty" : x.lessons.length > 1 ? x.lessons.length + " lessons" : "New"}</small></button>`; }).join("")}
       <button class="orb orb-add" id="addSub"><span class="globe add-globe"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span><b>Subcategory</b><small>Add</small></button></div>
     <div id="detail"></div>
     ${starter.length ? `<div class="sec-h" style="margin-top:0"><h3 style="font-size:17px">Starter pack <span class="muted" style="font-weight:600;font-size:14px">${starter.filter(l => kindOf(l)==="video").length} videos · ${starter.filter(l => kindOf(l)==="pdf").length} PDFs · ${starter.filter(l => kindOf(l)==="link").length} websites</span></h3></div>
     <div class="lessons">${starter.map(lessonCard).join("")}</div>` : ""}
-    <div class="sec-h" style="margin-top:0"><h3 style="font-size:17px">Your sources <span class="muted" style="font-weight:600;font-size:14px">${mine.length} / ${MAX_SOURCES}</span></h3>
-      <button class="act h-primary" id="addSrc" ${mine.length >= MAX_SOURCES ? "disabled style='opacity:.4'" : ""}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add source</button></div>
+    <div class="sec-h" style="margin-top:0"><h3 style="font-size:17px">Your sources <span class="muted" style="font-weight:600;font-size:14px" title="${limitLine(countKinds(id))}">${mine.length}</span></h3>
+      <button class="act h-primary" id="addSrc" ${allFull(countKinds(id)) ? "disabled style='opacity:.4'" : ""}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add source</button></div>
     ${mine.length ? `<div class="lessons">${mine.map(lessonCard).join("")}</div>` : `<p class="muted" style="margin:-8px 0 0;font-size:14px">Add YouTube videos, website links or PDFs you want to learn from. Each one gets its own practice.</p>`}
     ${ART[s.id] ? "" : `<div style="display:flex;justify-content:flex-end"><button class="ghost" id="delSubj">Delete this subject</button></div>`}
   </div>`;
@@ -1626,7 +1691,7 @@ $("#avatarBtn").onclick = e => {
     if(a === "settings" || a === "signup") openSettings();
     if(a === "notes") openNotes();
     if(a === "about") sheet(`<div class="sheet-head"><div><div class="eyebrow">Intuish</div><h2>Test version</h2></div><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
-      <p class="lead" style="margin:0">Your progress is saved in this browser only. Each subject comes with a starter pack, and you can add up to 50 of your own sources (YouTube videos, websites, PDFs). PDFs stay on this device.</p>
+      <p class="lead" style="margin:0">Your progress is saved in this browser only. Each subject comes with a starter pack, and you can add up to 50 YouTube videos, 25 websites and 25 PDFs of your own. PDFs stay on this device.</p>
       <div style="display:flex;justify-content:flex-end"><button class="btn" data-close data-focus>Got it</button></div>`);
   });
 };

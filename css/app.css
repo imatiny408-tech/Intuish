@@ -445,3 +445,4 @@ body.in-study{background:radial-gradient(900px 500px at 10% 0%,rgba(12,104,218,.
 .pc-streak.warm .flame{filter:grayscale(.35) opacity(.8);background:radial-gradient(circle at 50% 62%,rgba(59,189,254,.14),rgba(12,104,218,.04) 60%,transparent 78%)}
 .pc-streak.out .flame{filter:grayscale(1) opacity(.3)}
 @media (prefers-reduced-motion: reduce){.opt.spark,.opt.spark::after,.teach-ring .fill{animation:none}.teach-ring .fill{stroke-dashoffset:0}}
+.src-limits{margin:2px 0 0;font-size:12.5px;font-variant-numeric:tabular-nums}
