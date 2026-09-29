@@ -288,7 +288,8 @@ function renderHome(){
   const due = dueItems().length;
   $("#remPill").hidden = true; $("#remCount").textContent = due; renderPulse();
   const rl = resumeLesson(), rb = $("#resumeBtn");
-  if(rb){ rb.hidden = !rl; if(rl){ rb.href = `#/study/${rl.id}`; rb.querySelector("b").textContent = rl.title; rb.title = `Resume ${rl.title}`; } }
+  if(rb){ const first = !rl && allLessons().find(l => l.subj === (mySubjects()[0] || {}).id), go = rl || first;
+    rb.hidden = !go; if(go){ rb.href = `#/study/${go.id}`; rb.querySelector("span").textContent = rl ? "Resume lesson" : "Start studying"; rb.querySelector("b").textContent = go.title; rb.title = `${rl ? "Resume" : "Start"} ${go.title}`; } }
   const ord = D.order || [], at = s => { const i = ord.indexOf(s.id); return i < 0 ? 1e6 : i; };
   const subs = mySubjects().map((s, i) => [s, i]).sort((a, b) => (at(a[0]) - at(b[0])) || (a[1] - b[1])).map(x => x[0]), many = subs.length > 6;
   $("#grid").classList.toggle("many", many); document.querySelector("#homeView .wrap").classList.toggle("many", many);
@@ -538,9 +539,13 @@ function fixSource(L, onDone){
 // Lessons you opened most recently come first; the rest keep their order
 const byRecent = list => list.map((L, i) => [L, i]).sort((a, b) => (((D.lessons[b[0].id] || {}).opened || 0) - ((D.lessons[a[0].id] || {}).opened || 0)) || (a[1] - b[1])).map(x => x[0]);
 function resumeLesson(subjId){
-  const L = D.last && lessonById(D.last);
-  if(subjId){ const mine = allLessons().filter(l => l.subj === subjId && (D.lessons[l.id] || {}).opened).sort((a, b) => D.lessons[b.id].opened - D.lessons[a.id].opened)[0]; return mine && LS(mine).view !== "summary" ? mine : null; }
-  return L && LS(L).view !== "summary" && LS(L).view !== "review" ? L : null;
+  // Most recently opened unfinished lesson; falls back to any lesson with progress (opened before this was tracked)
+  const st = L => D.lessons[L.id] || {}, finished = L => st(L).view === "summary" || st(L).view === "review";
+  const started = L => st(L).opened || (st(L).answers || []).length || st(L).idx > 0 || st(L).t > 1;
+  const pool = allLessons().filter(L => (!subjId || L.subj === subjId) && started(L));
+  const rank = L => st(L).opened || (L.id === D.last ? 1 : 0);
+  const open = pool.filter(L => !finished(L)).sort((a, b) => rank(b) - rank(a));
+  return open[0] || null;
 }
 function lessonCard(L){
   const st = LS(L), m = D.meta[videoOf(L) || ""] || {}, p = m.dur ? Math.min(100, st.t / m.dur * 100) : 0;
@@ -809,7 +814,7 @@ function openSubject(id, keepTopic){
   w.innerHTML = `<div class="h-panel" role="dialog" aria-modal="true" aria-label="${esc(s.name)}">
     <div class="p-head"><div class="art">${artFor(s)}</div>
       <div><h2>${esc(s.name)}</h2><p class="p-sum">${ss.known ? `You’ve shown you know ${ss.pct}% of this material.` : starter.length ? `${starter.length} starter sources ready. Pick a subcategory to begin.` : !topics.length ? "Start by adding a subcategory, then add sources to it." : mine.length ? "Pick a subcategory to begin." : "Add sources to a subcategory to start learning."}</p></div>
-      <button class="x" aria-label="Close">${ICON.close}</button>
+      <div class="p-head-r">${resume ? `<a class="resume-pill" href="#/study/${resume.id}" title="Resume ${esc(resume.title)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg><span>Resume study</span><b>${esc(resume.title)}</b></a>` : ""}<button class="x" aria-label="Close">${ICON.close}</button></div>
     </div>
     ${(D.goals[id]||[]).length ? `<div class="goal-chips"><span class="label">Your goals</span>${D.goals[id].map(g => `<span class="goal-chip">${esc(g)}</span>`).join("")}<button class="linkish" id="editGoals">Edit</button></div>` : `<div class="goal-chips"><button class="linkish" id="editGoals">Set your goals for ${esc(s.name)}</button></div>`}
     <div style="display:flex;align-items:center;gap:16px">${ring(ss.pct,84,8)}<div class="segs" style="flex:1">${tStats.map(x => `<i class="${x.st}" style="height:12px;border-radius:6px"></i>`).join("")}</div></div>
@@ -824,7 +829,6 @@ function openSubject(id, keepTopic){
           ${left.length ? `<div class="sort-left"><span class="muted">${last.aiFailed ? "The AI couldn’t be reached, so these are still in My sources. Tap Load lessons again later, or choose where they go:" : !aiReady() ? "Turn on AI checking in Settings so these can be sorted for you, or choose where they go:" : "The AI couldn’t tell where these belong. Choose where they go:"}</span>${left.map(L => `<label class="sort-row"><span class="tr-ico">${KIND[kindOf(L)].icon}</span><b>${esc(L.title)}</b><select data-file="${L.id}" aria-label="Subcategory for ${esc(L.title)}"><option value="">My sources</option>${topics.filter(t => t !== MY).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>`).join("")}</div>` : ""}</div>`;
       }
       return waiting && (others || aiReady()) ? `<div class="sort-bar"><span>${waiting} source${waiting>1?"s are":" is"} waiting in My sources. Load lessons reads each one (video titles, website pages and PDF text) and puts it in the subcategory it fits.</span><button class="act h-primary" id="doSort">Load lessons</button></div>` : ""; })()}
-    ${resume ? `<a class="resume-bar" href="#/study/${resume.id}"><span class="rs-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg></span><span class="rs-t"><small>Pick up where you left off</small><b>${esc(resume.title)}</b></span><span class="act h-primary">Resume lesson</span></a>` : ""}
     <div id="detail"></div>
     ${starter.length ? `<div class="sec-h" style="margin-top:0"><h3 style="font-size:17px">Starter pack <span class="muted" style="font-weight:600;font-size:14px">${starter.filter(l => kindOf(l)==="video").length} videos · ${starter.filter(l => kindOf(l)==="pdf").length} PDFs · ${starter.filter(l => kindOf(l)==="link").length} websites</span></h3></div>
     <div class="lessons">${starter.map(lessonCard).join("")}</div>` : ""}

@@ -591,3 +591,6 @@ html,body{overscroll-behavior:none}
 .rs-t small{font-size:12.5px;color:var(--muted)}
 .rs-t b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .resume-pill span{flex:none;white-space:nowrap}.resume-pill svg{flex:none}
+.p-head-r{display:flex;align-items:center;gap:10px;align-self:start;min-width:0}
+.p-head-r .resume-pill{max-width:min(300px,34vw)}
+@media (max-width:700px){.p-head-r .resume-pill span{display:none}.p-head-r .resume-pill{padding:0 12px}}
