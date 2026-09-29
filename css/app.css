@@ -594,3 +594,5 @@ html,body{overscroll-behavior:none}
 .p-head-r{display:flex;align-items:center;gap:10px;align-self:start;min-width:0}
 .p-head-r .resume-pill{max-width:min(300px,34vw)}
 @media (max-width:700px){.p-head-r .resume-pill span{display:none}.p-head-r .resume-pill{padding:0 12px}}
+.short-ans{width:100%;height:48px;border:1.5px solid var(--line);border-radius:var(--r-md);padding:0 16px;font:inherit;font-size:16px;background:var(--surface);color:var(--ink)}
+.short-ans:focus{border-color:var(--ink);outline:none}

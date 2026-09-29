@@ -25,18 +25,10 @@ const ICON = {
 
 /* Used for lessons you add yourself (no quiz written yet): the activity becomes active recall */
 const RECALL = [
-  {kind:"Recall", type:"open", prompt:"In your own words, what was the main idea of this video?",
-   hint:"Pause and picture the moment that felt most important. What was the teacher trying to get across?",
-   model:"Compare what you wrote with the video. Could you explain it to a friend without looking?",
-   look:["It’s in your own words","It’s the main point, not a small detail","You could say it without notes"]},
-  {kind:"Example", type:"open", prompt:"Give one example or detail from the video that backs that idea up.",
-   hint:"Scrub back to a moment you remember and watch 20 seconds again.",
-   model:"A good example is specific: something shown, said or worked through in the lesson.",
-   look:["It’s specific","It really connects to the main idea"]},
-  {kind:"Reflection", type:"open", noScore:true, prompt:"What’s one thing you’re still unsure about?",
-   hint:"Which part would you skip if you had to teach this?",
-   model:"That’s the part to rewatch next. Knowing what you don’t know yet is part of learning.",
-   look:["You named something concrete","You know where in the video to look"]}
+  {kind:"Recall", type:"open", short:true, prompt:"Name the one idea from this video you most want to remember.",
+   hint:"Pause and picture the moment that felt most important.",
+   model:"A few words is enough, as long as it names a real idea from the lesson.",
+   look:["It names one real idea from the lesson"]}
 ];
 
 /* ---------- Saved data ---------- */
@@ -1053,7 +1045,7 @@ $("#bigPlay").onclick = () => P.play();
 $("#cover").onclick = e => { if($("#frame").classList.contains("preview")){ if(!e.target.closest("a")) goToQuiz(); return; } if(!e.target.closest(".vid-msg")) P.play(); };
 function goToQuiz(){
   if(narrowMQ.matches){ M.pane = "study"; layout(); }
-  const first = document.querySelector("#actBody .opt:not([disabled]), #actBody textarea, #actFoot .btn");
+  const first = document.querySelector("#actBody .opt:not([disabled]), #actBody textarea, #actBody input, #actFoot .btn");
   if(first){ first.focus({preventScroll:true}); first.scrollIntoView({block:"nearest", behavior:"smooth"}); }
   const panel = document.querySelector(".panel.activity"); panel.classList.remove("nudge"); void panel.offsetWidth; panel.classList.add("nudge");
 }
@@ -1215,6 +1207,8 @@ function header(){
 function render(){
   header();
   const v = LS(cur).view;
+  if(cur && quizMaking.has(cur.id) && v !== "summary"){ body.innerHTML = `<div class="view"><div class="ai-v checking"><span class="ai-dot"></span>Writing questions from this ${SRC_WORD[kindOf(cur)] || "lesson"}…</div></div>`; foot.innerHTML = ""; return; }
+  { const st = LS(cur), n = itemsOf(cur).length; if(v === "q" && st.idx >= n){ st.idx = Math.max(0, n - 1); delete st.order; } }
   if(v === "summary") renderSummary(); else if(v === "review") renderReview(); else if(v === "break") renderBreak(); else renderQ();
   body.scrollTop = 0;
 }
@@ -1317,6 +1311,40 @@ async function videoTranscript(L){
   if(clean.length < 200) return "";
   D.meta[key] = Object.assign(m, {ex:clean.slice(0, 6000), kw:m.kw || topWords(clean, 60)}); save();
   return D.meta[key].ex;
+}
+// Your own sources get a real quiz: the AI reads the transcript (or page / PDF text) and writes tap-to-answer questions,
+// plus one short typed answer of a few words. Saved on the lesson so it's only made once.
+const QUIZ_SYSTEM = `You write quiz questions for a calm study app, from one lesson's material.
+Write 5 multiple-choice questions and 1 short-answer question. Test real ideas, facts and terms that the lesson actually teaches, not trivia like timestamps or what the presenter wore.
+Multiple choice: 4 short options, exactly one correct, the others plausible. Vary which position is correct.
+Short answer: the answer must be a specific term, name or number of 1 to 4 words (for example "What does UX stand for?"). Never ask "in your own words", for an example, or for an opinion.
+Keep every prompt under 20 words. Reply with only JSON.`;
+const quizMaking = new Set();
+async function makeQuiz(L){
+  if(L.questions || !L.custom || quizMaking.has(L.id) || !aiReady()) return false;
+  quizMaking.add(L.id);
+  try {
+    const v = kindOf(L) === "video" ? videoOf(L) : null, m = (v && D.meta[v]) || {};
+    let text = ""; try { text = v ? await videoTranscript(L) : await sourceExcerpt(L); } catch(e){}
+    const link = L.url || (v ? `https://www.youtube.com/watch?v=${v}` : "");
+    const shape = `[{"type":"mc","kind":"Concept","prompt":"…","options":["…","…","…","…"],"answer":0,"hint":"a nudge, not the answer","right":"one sentence on why it's right","wrong":"one sentence pointing back to the idea"},{"type":"short","kind":"Recall","prompt":"…","answer":"the 1 to 4 word answer","hint":"…"}]`;
+    const req = {system:QUIZ_SYSTEM, prompt:`Lesson: ${m.title || L.title}${m.author ? ` by ${m.author}` : ""}\nLink: ${link}\n${text ? `Material:\n${text.slice(0, 6000)}` : "No transcript was available, so use the video itself."}\n\nReply as a JSON array like: ${shape}`};
+    if(!text && v) req.video = link;
+    const raw = parseJSON(await aiAsk(req), "[") || [];
+    const qs = raw.map(x => {
+      if(x && x.type === "mc" && Array.isArray(x.options) && x.options.length >= 2 && Number.isInteger(+x.answer) && x.options[+x.answer] != null)
+        return {kind:x.kind || "Concept", prompt:String(x.prompt), options:x.options.slice(0, 4).map(String), answer:+x.answer, hint:x.hint || "Think back to the part of the lesson this came from.", right:x.right || "That's it.", wrong:x.wrong || "Not quite. Look back at that part of the lesson."};
+      if(x && x.type === "short" && x.prompt && x.answer)
+        return {kind:x.kind || "Recall", type:"open", short:true, prompt:String(x.prompt), hint:x.hint || "It's a word or two from the lesson.", model:`Answer: ${x.answer}`, look:[`It matches “${x.answer}” (spelling doesn’t matter)`]};
+      return null; }).filter(Boolean);
+    const mc = qs.filter(q => !q.type), short = qs.filter(q => q.type).slice(0, 1);
+    if(mc.length < 3) return false;
+    L.questions = mc.slice(0, 6).concat(short);
+    // Start the lesson fresh on the new questions (answers to the old recall prompts don't line up with them)
+    const st = LS(L); if(st.view !== "summary"){ st.idx = 0; st.answers = []; st.view = "q"; delete st.order; delete st.up; }
+    Object.keys(D.q).forEach(k => { if(k.startsWith(L.id + ":")) delete D.q[k]; });
+    save(); return true;
+  } catch(e){ return false; } finally { quizMaking.delete(L.id); }
 }
 async function aiSortLeftovers(subjId, left){
   // Read the transcripts first, a few at a time
@@ -1427,7 +1455,7 @@ function renderQ(){
   html += `<div class="eyebrow"><span>${esc(q.kind)}</span>${st.up === st.idx ? `<span class="up-tag">Stepping it up</span>` : ""}</div><p class="prompt" id="qPrompt">${esc(q.prompt)}</p>`;
   if(open){
     html += `<div style="display:flex;flex-direction:column;gap:8px"><label class="label" for="openAns">Your answer</label>
-      <textarea id="openAns" placeholder="Write it in your own words…" ${fb?"disabled":""}>${esc(Qs.text)}</textarea></div>`;
+      ${q.short ? `<input id="openAns" class="short-ans" autocomplete="off" placeholder="A few words" value="${esc(Qs.text)}" ${fb?"disabled":""}>` : `<textarea id="openAns" placeholder="Write it in your own words…" ${fb?"disabled":""}>${esc(Qs.text)}</textarea>`}</div>`;
   } else {
     html += `<div class="options" role="radiogroup" aria-labelledby="qPrompt">` + q.options.map((o, i) => {
       // After Check: the correct answer is outlined green and a wrong pick red, and both stay until Continue
@@ -1450,15 +1478,17 @@ function renderQ(){
   body.innerHTML = html + `</div>`;
 
   if(!fb){
-    const ready = open ? Qs.text.trim().length > 3 : Qs.selected !== null && (!!Qs.conf || Qs.attempts > 0);
-    foot.innerHTML = `<button class="ghost" id="explainBtn" ${Qs.hint?"disabled style='opacity:.45'":""}>${ICON.bulb} Explain</button><span class="grow"></span><button class="btn" id="checkBtn" ${ready?"":"disabled"}>${open?"Compare":"Check Answer"}</button>`;
+    const ready = open ? Qs.text.trim().length > (q.short ? 0 : 3) : Qs.selected !== null && (!!Qs.conf || Qs.attempts > 0);
+    foot.innerHTML = `<button class="ghost" id="explainBtn" ${Qs.hint?"disabled style='opacity:.45'":""}>${ICON.bulb} Explain</button><span class="grow"></span><button class="btn" id="checkBtn" ${ready?"":"disabled"}>${open && !q.short?"Compare":"Check Answer"}</button>`;
   } else if(open) foot.innerHTML = `<span class="grow"></span><button class="btn" id="nextBtn">Continue <span aria-hidden="true">→</span></button>`;
   else if(Qs.correct || Qs.revealed) foot.innerHTML = `<span class="grow"></span><button class="btn" id="nextBtn">Continue <span aria-hidden="true">→</span></button>`;
   else foot.innerHTML = `<span class="grow"></span><button class="btn" id="nextBtn">Continue <span aria-hidden="true">→</span></button>`;
 
   body.querySelectorAll(".opt").forEach(b => b.onclick = () => select(+b.dataset.i));
   body.querySelectorAll("[data-conf]").forEach(b => b.onclick = () => { Qs.conf = b.dataset.conf; renderQ(); });
-  const ta = $("#openAns"); if(ta) ta.oninput = () => { Qs.text = ta.value; const c = $("#checkBtn"); if(c) c.disabled = Qs.text.trim().length <= 3; };
+  const ta = $("#openAns"), minLen = curQ() && curQ().short ? 0 : 3;
+  if(ta){ ta.oninput = () => { Qs.text = ta.value; const c = $("#checkBtn"); if(c) c.disabled = Qs.text.trim().length <= minLen; };
+    if(ta.tagName === "INPUT") ta.onkeydown = e => { if(e.key === "Enter"){ const c = $("#checkBtn"); if(c && !c.disabled){ e.preventDefault(); c.click(); } } }; }
   const on = (id, f) => { const n = document.getElementById(id); if(n) n.onclick = f; };
   on("explainBtn", () => { Qs.hint = true; renderQ(); });
   on("checkBtn", check); on("nextBtn", next);
@@ -1676,6 +1706,8 @@ function openStudy(L){
   stage.classList.toggle("doc", !isVideo);
   $(".player-slot").hidden = !isVideo; $("#docSlot").hidden = isVideo;
   if(!isVideo){ if(P.playing) P.pause(); if(changed) mountDoc(L); }
+  // Your own sources: write a real quiz the first time (the activity shows "Writing questions…" meanwhile)
+  if(L.custom && !L.questions && aiReady() && LS(L).view !== "summary") makeQuiz(L).then(ok => { if(cur === L){ if(ok) newQ(); render(); ui(); } });
   setLessonText(); layout(); render(); ui(); if(changed && window.IntuishExtras) window.IntuishExtras.renderNotes();
   if(isVideo && (changed || !P.ready)) mountVideo();
   if(isVideo && !P.apiReady && !P.apiFailed && !loadApi.done){ loadApi.done = true; loadApi(); }
