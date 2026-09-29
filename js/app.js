@@ -366,14 +366,29 @@ const KIND = {
 };
 const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch(e){ return u; } };
 
-// PDFs are kept on this device in IndexedDB (too big for localStorage)
+// PDFs are kept on this device in IndexedDB (too big for localStorage).
+// Stored as raw bytes, not the File itself: Safari on iPad refuses to store File/Blob objects in some modes.
+// If IndexedDB is unavailable, the Cache Storage copy is used instead.
 const PDFS = {
-  db: null,
-  open(){ return this.db || (this.db = new Promise((res, rej) => { const r = indexedDB.open("studyhub", 1); r.onupgradeneeded = () => r.result.createObjectStore("pdfs"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); })); },
-  async tx(mode, fn){ const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction("pdfs", mode); const q = fn(t.objectStore("pdfs")); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }); },
-  put(k, blob){ return this.tx("readwrite", s => s.put(blob, k)); },
-  get(k){ return this.tx("readonly", s => s.get(k)); },
-  del(k){ return this.tx("readwrite", s => s.delete(k)); }
+  db: null, CACHE: "intuish-pdfs",
+  open(){ return this.db || (this.db = new Promise((res, rej) => { const r = indexedDB.open("studyhub", 1); r.onupgradeneeded = () => r.result.createObjectStore("pdfs"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error("blocked")); }).catch(e => { this.db = null; throw e; })); },
+  async tx(mode, fn){ const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction("pdfs", mode); const q = fn(t.objectStore("pdfs")); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }); },
+  key: k => "pdf/" + encodeURIComponent(k),
+  async put(k, file){
+    const buf = await file.arrayBuffer(), type = file.type || "application/pdf";
+    try { navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(()=>{}); } catch(e){}
+    try { await this.tx("readwrite", s => s.put({buf, type}, k)); return; } catch(e){}
+    if(!self.caches) throw new Error("no storage");
+    const c = await caches.open(this.CACHE); await c.put(this.key(k), new Response(buf, {headers:{"Content-Type":type}}));
+  },
+  async get(k){
+    let v = null; try { v = await this.tx("readonly", s => s.get(k)); } catch(e){}
+    if(v instanceof Blob) return v;
+    if(v && v.buf) return new Blob([v.buf], {type:v.type || "application/pdf"});
+    if(self.caches){ const r = await (await caches.open(this.CACHE)).match(this.key(k)); if(r) return r.blob(); }
+    return null;
+  },
+  async del(k){ try { await this.tx("readwrite", s => s.delete(k)); } catch(e){} if(self.caches){ try { await (await caches.open(this.CACHE)).delete(this.key(k)); } catch(e){} } }
 };
 
 function addSourceSheet(subjId, topic, onDone){
@@ -404,7 +419,7 @@ function addSourceSheet(subjId, topic, onDone){
     const L = {id:"u"+now().toString(36)+Math.random().toString(36).slice(2,5), subj:subjId, topic:t, course:s.name, custom:true, added:now()};
     if(f){
       if(f.size > 60e6){ toast("That PDF is over 60 MB. Try a smaller one."); return; }
-      try { await PDFS.put(L.id, f); } catch(e){ toast("This browser couldn’t save the PDF"); return; }
+      try { await PDFS.put(L.id, f); } catch(e){ toast("Couldn’t save the PDF. Your device may be out of space."); return; }
       Object.assign(L, {kind:"pdf", title:name || f.name.replace(/\.pdf$/i, ""), file:f.name});
     } else if(url){
       const v = parseYouTube(url);
@@ -583,21 +598,67 @@ function sourceText(L){
   const m = D.meta[videoOf(L)] || {};
   return [L.title !== L.topic ? L.title : "", m.title || "", L.file || "", L.url ? decodeURIComponent(L.url).replace(/^https?:\/\/(www\.)?/,"").replace(/[\/._\-?=&#]+/g," ") : ""].join(" ");
 }
+// The most frequent meaningful words of a text, so a whole page or PDF fits in a few hundred bytes of storage
+function topWords(text, n){
+  const c = {}; sortWords(text).forEach(w => { if(w.length > 2 && !/^\d+$/.test(w)) c[w] = (c[w] || 0) + 1; });
+  return Object.keys(c).sort((a, b) => c[b] - c[a]).slice(0, n || 60).join(" ");
+}
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+// pdf.js is loaded only when a PDF is read
+let pdfLib = null;
+function loadPdfLib(){
+  return pdfLib || (pdfLib = new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "js/vendor/pdf.min.js";
+    sc.onload = () => { const L = window.pdfjsLib; if(!L) return rej(new Error("pdf.js")); L.GlobalWorkerOptions.workerSrc = "js/vendor/pdf.worker.min.js"; res(L); };
+    sc.onerror = () => { pdfLib = null; rej(new Error("pdf.js")); }; document.head.appendChild(sc); }));
+}
+async function readPdfText(blob){
+  const lib = await loadPdfLib(), doc = await lib.getDocument({data:new Uint8Array(await blob.arrayBuffer())}).promise;
+  let text = ""; try { const md = await doc.getMetadata(); if(md && md.info && md.info.Title) text += (md.info.Title + " ").repeat(3); } catch(e){}
+  for(let i = 1; i <= Math.min(doc.numPages, 20); i++){ const pg = await doc.getPage(i); const tc = await pg.getTextContent(); text += " " + tc.items.map(x => x.str).join(" "); if(text.length > 200000) break; }
+  doc.destroy && doc.destroy(); return text;
+}
+// Websites can't be read directly from the browser, so a public reader service fetches the page text (title and description as a fallback)
+async function readLinkText(url){
+  try { const r = await withTimeout(fetch("https://r.jina.ai/" + url, {headers:{"Accept":"text/plain"}}), 20000); if(r.ok){ const t = await r.text(); if(t && t.length > 80) return t.slice(0, 200000); } } catch(e){}
+  try { const r = await withTimeout(fetch("https://api.microlink.io/?url=" + encodeURIComponent(url)), 15000); if(r.ok){ const j = await r.json(); const d = j && j.data; if(d && (d.title || d.description)) return ((d.title || "") + " ").repeat(3) + (d.description || ""); } } catch(e){}
+  return "";
+}
+// Reads one source's content once and keeps its key words in D.meta["src:<id>"]
+async function readSource(L){
+  const key = "src:" + L.id; if(D.meta[key] && D.meta[key].kw != null) return true;
+  let text = "";
+  try {
+    if(kindOf(L) === "pdf" && !L.url){ const b = await PDFS.get(L.id); if(b) text = await withTimeout(readPdfText(b), 45000); }
+    else if(L.url) text = await readLinkText(L.url);
+  } catch(e){}
+  if(!text) return false;
+  D.meta[key] = {kw:topWords(text, 60)}; return true;
+}
 function sortPlan(subjId){
   const s = subjById(subjId), topics = topicsOf(s).filter(t => t !== MY);
   const subjWords = new Set(sortWords(s.name));
   const goalFor = t => (D.goals[subjId] || []).filter(g => topicName(g) === t).join(" ");
+  // A subcategory's words: its name, the goal it came from, and the titles of lessons already in it
   const vocab = topics.map(t => {
-    const base = new Set(sortWords(t + " " + goalFor(t)).filter(w => !subjWords.has(w)));
+    const titles = allLessons().filter(l => l.subj === subjId && l.topic === t).map(l => l.title !== t ? l.title : "").join(" ");
+    const base = new Set(sortWords(t + " " + goalFor(t) + " " + titles).filter(w => !subjWords.has(w)));
     SORT_SYN.forEach(g => { const gs = g.map(stem); if(gs.some(w => base.has(w))) gs.forEach(w => base.add(w)); });
     return base;
   });
+  const pre = w => w.slice(0, 5);
+  const vocabPre = vocab.map(v => new Set([...v].filter(w => w.length >= 5).map(pre)));
   const moves = [];
   sourcesOf(subjId).filter(L => L.topic === MY || !topics.includes(L.topic)).forEach(L => {
     const words = new Set(sortWords(sourceText(L)).filter(w => !subjWords.has(w)));
+    const kw = ((D.meta["src:" + L.id] || {}).kw || "").split(" ").filter(w => w && !subjWords.has(w) && !words.has(w));
+    // Title, name and link words count 3; words from inside the page or PDF count 1 (more for the most frequent)
     let best = -1, score = 0;
-    vocab.forEach((v, i) => { let n = 0; words.forEach(w => { if(v.has(w)) n++; }); if(n > score){ score = n; best = i; } });
-    if(best >= 0) moves.push({L, from:L.topic, to:topics[best]});
+    vocab.forEach((v, i) => {
+      let n = 0; words.forEach(w => { if(v.has(w)) n += 3; else if(w.length >= 5 && vocabPre[i].has(pre(w))) n += 1; });
+      kw.forEach((w, r) => { if(v.has(w)) n += r < 15 ? 2 : 1; });
+      if(n > score){ score = n; best = i; }
+    });
+    if(best >= 0 && score >= 2) moves.push({L, from:L.topic, to:topics[best]});
   });
   return moves;
 }
@@ -608,7 +669,7 @@ async function fetchTitles(subjId){
   await Promise.all(need.map(async L => {
     const id = videoOf(L), u = `https://www.youtube.com/watch?v=${id}`;
     for(const api of [`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(u)}`, `https://noembed.com/embed?url=${encodeURIComponent(u)}`]){
-      try { const r = await fetch(api); if(!r.ok) continue; const j = await r.json(); if(!j.title) continue;
+      try { const r = await withTimeout(fetch(api), 12000); if(!r.ok) continue; const j = await r.json(); if(!j.title) continue;
         const m = D.meta[id] || (D.meta[id] = {}); m.title = j.title; if(j.author_name) m.author = j.author_name;
         if(L.autoTitle || L.title === L.topic){ L.title = j.title; delete L.autoTitle; }
         return; } catch(e){}
@@ -616,14 +677,23 @@ async function fetchTitles(subjId){
   }));
   if(need.length) save();
 }
-function sortSources(subjId, onDone){
-  fetchTitles(subjId).then(() => {
-    const moves = sortPlan(subjId), left = sourcesOf(subjId).filter(L => L.topic === MY).length - moves.length;
-    if(!moves.length){ toast("None of your sources clearly matched a subcategory. They stay in My sources."); return; }
-    moves.forEach(m => m.L.topic = m.to); save();
-    D._lastSort = {subj:subjId, moves:moves.map(m => ({id:m.L.id, from:m.from}))};
-    onDone && onDone(moves.length, left);
-  });
+// Reads every waiting source (video titles, website text, PDF text), then files each one where it fits
+async function sortSources(subjId, onDone, onProgress){
+  const topics = topicsOf(subjById(subjId)).filter(t => t !== MY);
+  const waiting = sourcesOf(subjId).filter(L => L.topic === MY || !topics.includes(L.topic));
+  let done = 0; const tick = () => onProgress && onProgress(++done, waiting.length);
+  const vids = waiting.filter(L => kindOf(L) === "video"), docs = waiting.filter(L => kindOf(L) !== "video");
+  const titles = fetchTitles(subjId).then(() => vids.forEach(tick));
+  const unread = [];
+  // Two at a time so a phone or iPad doesn't run out of memory on big PDFs
+  const q = docs.slice(); const worker = async () => { while(q.length){ const L = q.shift(); if(!(await readSource(L))) unread.push(L.id); tick(); } };
+  await Promise.all([titles, worker(), worker()]);
+  save();
+  const moves = sortPlan(subjId);
+  moves.forEach(m => m.L.topic = m.to);
+  const left = waiting.filter(L => !moves.some(m => m.L === L)).map(L => L.id);
+  D._lastSort = {subj:subjId, read:waiting.length - unread.length, total:waiting.length, unread, left, moves:moves.map(m => ({id:m.L.id, from:m.from}))};
+  save(); onDone && onDone(moves.length, left.length);
 }
 function undoSort(onDone){
   const u = D._lastSort; if(!u) return;
@@ -646,8 +716,13 @@ function openSubject(id, keepTopic){
     <div class="orbs">${topics.map((t,i) => { const x = tStats[i]; return `<button class="orb" data-i="${i}" aria-pressed="false">${x.lessons.length ? coverFor(s, t, x.lessons, x.st, x.pct, s.id+i) : globe(x.st, x.pct, s.id+i)}<b>${esc(t)}</b><small>${x.seen ? x.pct+"%" : !x.lessons.length ? "Empty" : x.lessons.length > 1 ? x.lessons.length + " lessons" : "New"}</small></button>`; }).join("")}
       <button class="orb orb-add" id="addSub"><span class="globe add-globe"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span><b>Subcategory</b><small>Add</small></button></div>
     ${(() => { const waiting = mine.filter(L => L.topic === MY).length, others = topics.filter(t => t !== MY).length, last = D._lastSort && D._lastSort.subj === id ? D._lastSort : null;
-      return last ? `<div class="sort-bar"><span>Loaded ${last.moves.length} lesson${last.moves.length>1?"s":""} into your subcategories.${waiting ? ` ${waiting} didn’t clearly fit and stayed in My sources.` : ""}</span><button class="linkish" id="undoSort">Undo</button><button class="linkish" id="okSort">Done</button></div>`
-        : waiting && others ? `<div class="sort-bar"><span>${waiting} source${waiting>1?"s are":" is"} waiting in My sources. Load lessons reads them and puts each one in the subcategory it fits.</span><button class="act h-primary" id="doSort">Load lessons</button></div>` : ""; })()}
+      if(last){
+        const left = (last.left || []).map(lessonById).filter(L => L && L.topic === MY);
+        const unread = (last.unread || []).length;
+        return `<div class="sort-bar"><span>${last.total != null ? `Read ${last.read} of ${last.total} source${last.total>1?"s":""}. ` : ""}${last.moves.length ? `Loaded ${last.moves.length} lesson${last.moves.length>1?"s":""} into your subcategories.` : "None of them clearly matched a subcategory."}${unread ? ` ${unread} couldn’t be opened, so only the name was used.` : ""}</span><button class="linkish" id="undoSort" ${last.moves.length ? "" : "hidden"}>Undo</button><button class="linkish" id="okSort">Done</button>
+          ${left.length ? `<div class="sort-left"><span class="muted">${left.length === 1 ? "This one didn’t clearly fit. Choose where it goes:" : "These didn’t clearly fit. Choose where each one goes:"}</span>${left.map(L => `<label class="sort-row"><span class="tr-ico">${KIND[kindOf(L)].icon}</span><b>${esc(L.title)}</b><select data-file="${L.id}" aria-label="Subcategory for ${esc(L.title)}"><option value="">My sources</option>${topics.filter(t => t !== MY).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>`).join("")}</div>` : ""}</div>`;
+      }
+      return waiting && others ? `<div class="sort-bar"><span>${waiting} source${waiting>1?"s are":" is"} waiting in My sources. Load lessons reads each one (video titles, website pages and PDF text) and puts it in the subcategory it fits.</span><button class="act h-primary" id="doSort">Load lessons</button></div>` : ""; })()}
     <div id="detail"></div>
     ${starter.length ? `<div class="sec-h" style="margin-top:0"><h3 style="font-size:17px">Starter pack <span class="muted" style="font-weight:600;font-size:14px">${starter.filter(l => kindOf(l)==="video").length} videos · ${starter.filter(l => kindOf(l)==="pdf").length} PDFs · ${starter.filter(l => kindOf(l)==="link").length} websites</span></h3></div>
     <div class="lessons">${starter.map(lessonCard).join("")}</div>` : ""}
@@ -673,6 +748,12 @@ function openSubject(id, keepTopic){
         return `<div class="topic-row"><span class="tr-ico">${KIND[kindOf(L)].icon}</span><div class="tr-t"><b>${esc(L.title)}</b><span>${done ? "Finished" : st.answers.length ? `Question ${st.idx+1} of ${n}` : `${n} ${L.questions ? "questions" : "recall prompts"}`}</span></div><a class="act h-primary" href="#/ready/${L.id}">${ICON.q}${done ? "Review" : st.answers.length ? "Continue" : "Start"}</a></div>`; }).join("")}
     </div>`;
   };
+  w.addEventListener("change", e => {
+    const sel = e.target.closest("[data-file]"); if(!sel || !sel.value) return;
+    const L = lessonById(sel.dataset.file); if(!L) return;
+    const last = D._lastSort; if(last && last.subj === id){ last.moves.push({id:L.id, from:L.topic}); }
+    L.topic = sel.value; save(); toast(`Moved to ${sel.value}`); renderHome(); reopen();
+  });
   w.addEventListener("click", e => {
     if(e.target === w || e.target.closest(".x")) return w.remove();
     const rm = e.target.closest("[data-remove]"); if(rm){ e.preventDefault(); removeSource(lessonById(rm.dataset.remove), () => { renderHome(); reopen(); }); return; }
@@ -680,7 +761,7 @@ function openSubject(id, keepTopic){
     if(e.target.closest("[data-add-topic]")) return addSourceSheet(id, topics[picked], () => { renderHome(); reopen(); });
     if(e.target.closest("#addSub")) return addSubcategory(id, i => { picked = i; renderHome(); reopen(); });
     if(e.target.closest("[data-del-topic]")){ D.extraTopics[id] = (D.extraTopics[id]||[]).filter(t => t !== topics[picked]); picked = null; save(); renderHome(); return reopen(); }
-    if(e.target.closest("#doSort")){ e.target.closest("#doSort").disabled = true; e.target.closest("#doSort").textContent = "Reading sources…"; return sortSources(id, () => { renderHome(); reopen(); }); }
+    if(e.target.closest("#doSort")){ const b = e.target.closest("#doSort"); b.disabled = true; b.textContent = "Reading sources…"; return sortSources(id, () => { renderHome(); if(w.isConnected) reopen(); }, (n, t) => { b.textContent = `Reading ${Math.min(n + 1, t)} of ${t}…`; }); }
     if(e.target.closest("#undoSort")) return undoSort(() => { renderHome(); reopen(); toast("Put back in My sources"); });
     if(e.target.closest("#okSort")){ delete D._lastSort; save(); return reopen(); }
     if(e.target.closest("#delSubj")) return deleteSubject(s, w);
@@ -881,6 +962,8 @@ $("#speedBtn").onclick = () => P.rate(SPEEDS[(SPEEDS.indexOf(D.ui.speed) + 1) % 
 function layout(){
   app.classList.toggle("narrow", narrowMQ.matches);
   stage.classList.toggle("expanded", M.mode === "expanded");
+  stage.classList.toggle("q-expanded", !!M.qx);
+  const qb = $("#qExpand"); if(qb){ qb.setAttribute("aria-expanded", !!M.qx); qb.hidden = !!M.qx; }
   if(M.mode !== "expanded" && window.IntuishFsNoteOff) window.IntuishFsNoteOff();
   stage.classList.toggle("mini", M.mode === "mini");
   stage.dataset.pane = M.pane;
@@ -897,8 +980,28 @@ function layout(){
   syncFullscreen(); wake(); save();
 }
 narrowMQ.addEventListener ? narrowMQ.addEventListener("change", layout) : narrowMQ.addListener(layout);
-function setMode(m){ M.mode = m; if(m === "expanded") M.pane = "video"; layout(); }
-function exitExpanded(){ M.mode = "split"; M.pane = narrowMQ.matches ? "video" : "study"; layout(); }
+// One pattern for every expanded view (video, questions, and anything added later):
+// Expanded → Collapse (X button or Esc) → back to the exact place you were: same layout, pane, scroll and focus.
+let EXP = null;
+function snapshot(kind){ const les = $(".panel.lesson"); return {kind, mode:M.mode, pane:M.pane, body:$("#actBody").scrollTop, lesson:les ? les.scrollTop : 0, focus:document.activeElement}; }
+function restoreSpot(x){
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    $("#actBody").scrollTop = x.body; const les = $(".panel.lesson"); if(les) les.scrollTop = x.lesson;
+    if(x.focus && x.focus.isConnected && x.focus.focus && !x.focus.closest("[hidden]")) try { x.focus.focus({preventScroll:true}); } catch(e){}
+  }));
+}
+function setMode(m){ if(m === "expanded" && M.mode !== "expanded"){ if(M.qx) collapseQuestions(true); EXP = snapshot("video"); } M.mode = m; if(m === "expanded") M.pane = "video"; layout(); }
+function exitExpanded(){
+  const x = EXP && EXP.kind === "video" ? EXP : null; EXP = null;
+  M.mode = x && x.mode !== "expanded" ? x.mode : "split";
+  M.pane = x ? x.pane : (narrowMQ.matches ? "video" : "study");
+  layout(); if(x) restoreSpot(x);
+}
+function expandQuestions(){ if(M.qx) return; if(M.mode === "expanded") exitExpanded(); EXP = snapshot("questions"); M.qx = true; M.pane = "study"; layout(); const c = $("#qCollapse"); if(c) c.focus({preventScroll:true}); }
+function collapseQuestions(quiet){
+  if(!M.qx) return; const x = EXP && EXP.kind === "questions" ? EXP : null; EXP = null; M.qx = false;
+  if(x) M.pane = x.pane; if(quiet) return; layout(); if(x) restoreSpot(x);
+}
 let fsOn = false;
 function syncFullscreen(){
   const d = document;
@@ -918,6 +1021,8 @@ function wake(){ const pl = $("#player"); pl.classList.remove("idle"); clearTime
 $("#expandBtn").onclick = () => setMode("expanded");
 $("#miniExpand").onclick = () => setMode("expanded");
 $("#fsReturn").onclick = exitExpanded;
+$("#qExpand").onclick = expandQuestions;
+$("#qCollapse").onclick = () => collapseQuestions();
 $("#fsExit").onclick = exitExpanded;
 $("#miniBtn").onclick = () => { M.mode = "mini"; M.pane = "study"; layout(); };
 $("#miniDock").onclick = () => { M.mode = "split"; layout(); };
@@ -1005,6 +1110,13 @@ function render(){
   if(v === "summary") renderSummary(); else if(v === "review") renderReview(); else if(v === "break") renderBreak(); else renderQ();
   body.scrollTop = 0;
 }
+const X_MARK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+// One answer choice. After checking, "right" gets a green outline and "wrong" a red one, each with a label so it isn't color alone
+function optBtn(text, i, cls, checked, locked, missed){
+  const tag = cls === "right" ? (missed ? "Correct answer" : "Correct") : cls === "wrong" ? "Your answer" : "";
+  const mark = cls === "right" ? `<span class="mark">${ICON.check}</span>` : cls === "wrong" ? `<span class="mark">${X_MARK}</span>` : "";
+  return `<button class="opt ${cls}" role="radio" aria-checked="${checked}" data-i="${i}" ${locked ? "disabled" : ""}${tag ? ` aria-label="${esc(text)}, ${tag}"` : ""}><span class="k">${"ABCD"[i]}</span><span class="opt-t">${esc(text)}${tag ? `<small class="opt-tag">${tag}</small>` : ""}</span>${mark}</button>`;
+}
 function renderQ(){
   const st = LS(cur), q = curQ(); if(!Qs) newQ();
   const open = q.type === "open", fb = Qs.phase === "feedback";
@@ -1017,9 +1129,9 @@ function renderQ(){
       <textarea id="openAns" placeholder="Write it in your own words…" ${fb?"disabled":""}>${esc(Qs.text)}</textarea></div>`;
   } else {
     html += `<div class="options" role="radiogroup" aria-labelledby="qPrompt">` + q.options.map((o, i) => {
-      let cls = ""; const showRight = fb && (Qs.correct || Qs.revealed) && i === q.answer;
-      if(showRight) cls = "right"; else if(fb && i === Qs.selected && !Qs.correct) cls = "wrong";
-      return `<button class="opt ${cls}" role="radio" aria-checked="${Qs.selected===i}" data-i="${i}" ${fb?"disabled":""}><span class="k">${"ABCD"[i]}</span><span>${esc(o)}</span>${showRight?`<span class="mark">${ICON.check}</span>`:""}</button>`;
+      // After Check: the correct answer is outlined green and a wrong pick red, and both stay until Continue
+      const showRight = fb && i === q.answer, showWrong = fb && i === Qs.selected && !Qs.correct;
+      return optBtn(o, i, showRight ? "right" : showWrong ? "wrong" : "", Qs.selected === i, fb, !Qs.correct);
     }).join("") + `</div>`;
   }
   if(!open && !fb && Qs.selected !== null && !Qs.attempts) html += confRow(Qs.conf);
@@ -1035,7 +1147,7 @@ function renderQ(){
       const cn = Qs.attempts === 1 && !Qs.revealed ? confNote(Qs.correct, Qs.conf) : "", note = cn ? `<p class="conf-note">${cn}</p>` : "";
       if(Qs.correct) html += `<div class="feedback good"><h3>Correct.</h3><p>${esc(q.right)}</p>${note}</div>`;
       else if(Qs.revealed) html += `<div class="feedback"><h3>The answer is ${"ABCD"[q.answer]}.</h3><p>${esc(q.right)}</p>${flag}</div>`;
-      else html += `<div class="feedback"><h3>Not quite.</h3><p>${esc(q.wrong)}</p>${note}${flag}</div>`;
+      else html += `<div class="feedback bad"><h3>Not quite. The answer is ${"ABCD"[q.answer]}.</h3><p>${esc(q.wrong)}</p><p>${esc(q.right)}</p>${note}${flag}</div>`;
     }
   }
   body.innerHTML = html + `</div>`;
@@ -1045,7 +1157,7 @@ function renderQ(){
     foot.innerHTML = `<button class="ghost" id="explainBtn" ${Qs.hint?"disabled style='opacity:.45'":""}>${ICON.bulb} Explain</button><span class="grow"></span><button class="btn" id="checkBtn" ${ready?"":"disabled"}>${open?"Compare":"Check Answer"}</button>`;
   } else if(open) foot.innerHTML = `<span class="grow"></span><button class="btn" id="nextBtn" ${Qs.selfRated===null?"disabled":""}>Continue <span aria-hidden="true">→</span></button>`;
   else if(Qs.correct || Qs.revealed) foot.innerHTML = `<span class="grow"></span><button class="btn" id="nextBtn">Continue <span aria-hidden="true">→</span></button>`;
-  else foot.innerHTML = `<button class="ghost" id="revealBtn">Show answer</button><span class="grow"></span><button class="btn" id="retryBtn">Try again</button>`;
+  else foot.innerHTML = `<span class="grow"></span><button class="btn" id="nextBtn">Continue <span aria-hidden="true">→</span></button>`;
 
   body.querySelectorAll(".opt").forEach(b => b.onclick = () => select(+b.dataset.i));
   body.querySelectorAll("[data-conf]").forEach(b => b.onclick = () => { Qs.conf = b.dataset.conf; renderQ(); });
@@ -1193,7 +1305,8 @@ $("#moreBtn").onclick = e => {
   menu($("#moreBtn"), [
     ["timer", D.timer ? "Stop study timer" : "Study timer", D.timer ? "" : "Off"],
     vid && ["mini", M.mode === "mini" ? "Dock video" : "Mini player", ""],
-    vid && ["expand", M.mode === "expanded" ? "Return to Study" : "Expand video", "Esc"],
+    vid && ["expand", M.mode === "expanded" ? "Collapse video" : "Expand video", "Esc"],
+    ["qexpand", M.qx ? "Collapse questions" : "Expand questions", M.qx ? "Esc" : ""],
     ["remember", "Remember", due ? `${due} due` : ""],
     ["mastery", "What you know", ""],
     ["notes", "Notes", D.notes && D.notes.length ? String(D.notes.length) : ""],
@@ -1204,6 +1317,7 @@ $("#moreBtn").onclick = e => {
     if(a === "timer"){ if(D.timer){ D.timer = null; save(); tickClocks(); toast("Timer stopped"); } else openTimer(); }
     if(a === "mini"){ M.mode = M.mode === "mini" ? "split" : "mini"; M.pane = "study"; layout(); }
     if(a === "expand"){ M.mode === "expanded" ? exitExpanded() : setMode("expanded"); }
+    if(a === "qexpand"){ M.qx ? collapseQuestions() : expandQuestions(); }
     if(a === "remember") location.hash = "#/remember";
     if(a === "mastery") openMastery(false);
     if(a === "notes") window.IntuishExtras.openNotes();
@@ -1214,7 +1328,7 @@ $("#moreBtn").onclick = e => {
 
 document.addEventListener("keydown", e => {
   if($("#studyView").hidden) return;
-  if(e.key === "Escape"){ if(closeOverlays()) return; if(M.mode === "expanded") exitExpanded(); return; }
+  if(e.key === "Escape"){ if(closeOverlays()) return; if(M.mode === "expanded") exitExpanded(); else if(M.qx) collapseQuestions(); return; }
   if(e.target.closest("input,textarea,[contenteditable]") || document.querySelector(".sheet-wrap")) return;
   if(M.mode === "expanded" && (e.key === " " || e.key === "k")){ e.preventDefault(); P.toggle(); wake(); return; }
   if(M.mode === "expanded" && (e.key === "ArrowLeft" || e.key === "ArrowRight")){ e.preventDefault(); P.seek(P.t + (e.key === "ArrowRight" ? 5 : -5)); return; }
@@ -1263,6 +1377,7 @@ function leaveStudy(){
   if(P.playing) P.pause();
   persistTime();
   if(M.mode === "expanded"){ M.mode = "split"; syncFullscreen(); }
+  M.qx = false; EXP = null; stage.classList.remove("q-expanded");
 }
 
 /* ======================= REMEMBER ======================= */
@@ -1318,7 +1433,7 @@ function renderRemember(){
     <p class="prompt" id="rPrompt">${esc(q.prompt)}</p>
     <div class="options" role="radiogroup" aria-labelledby="rPrompt">${q.options.map((o, k) => {
       const cls = fb ? (k === q.answer ? "right" : (k === R.sel ? "wrong" : "")) : "";
-      return `<button class="opt ${cls}" role="radio" aria-checked="${R.sel===k}" data-i="${k}" ${fb?"disabled":""}><span class="k">${"ABCD"[k]}</span><span>${esc(o)}</span>${fb && k === q.answer ? `<span class="mark">${ICON.check}</span>` : ""}</button>`; }).join("")}</div>
+      return optBtn(o, k, cls, R.sel === k, fb, fb && !ok); }).join("")}</div>
     ${!fb && R.sel !== null ? confRow(R.conf) : ""}
     ${R.hint && !fb ? `<div class="hint" role="note">${ICON.bulb}<span>${esc(q.hint)}</span></div>` : ""}
     ${fb ? `<div class="feedback${ok ? " good" : ""}"><h3>${ok ? "Still there." : "It slipped a little."}</h3><p>${esc(q.right)}</p>${cn ? `<p class="conf-note">${cn}</p>` : ""}<p class="muted" style="font-size:13.5px;margin-top:4px">${nextTxt}</p></div>` : ""}
@@ -1431,6 +1546,7 @@ const SET_PAGES = [
   ["profile", "Profile", "Name and photo"],
   ["photos", "Subject photos", "Change the picture for each subject"],
   ["account", "Account", AUTH ? "Email sign-up" : "Email sign-in coming soon"],
+  ["appearance", "Appearance", "Light, dark, or match your device"],
   ["fonts", "Fonts", "Choose the font for each part of the app"],
   ["notes", "Notes", "Your notes from the last 30 days"],
   ["install", "Get the app", "Put Intuish on your home screen or desktop"],
@@ -1439,7 +1555,7 @@ const SET_PAGES = [
 function openSettings(page){
   if(page === "notes"){ openNotes(true); return; }
   const pr = D.profile, signed = !!(pr.session && pr.email);
-  const ICO = {profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>', photos:'<rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/>', account:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 7l9 6 9-6"/>', fonts:'<path d="M4 20l6-16h1l6 16M6.5 14h8"/><path d="M17 20h4"/>', install:'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M12 7v7M9 11l3 3 3-3M10 18h4"/>', notes:'<path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/>', data:'<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>'};
+  const ICO = {appearance:'<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>', profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>', photos:'<rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/>', account:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 7l9 6 9-6"/>', fonts:'<path d="M4 20l6-16h1l6 16M6.5 14h8"/><path d="M17 20h4"/>', install:'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M12 7v7M9 11l3 3 3-3M10 18h4"/>', notes:'<path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/>', data:'<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>'};
   const icon = k => `<span class="set-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICO[k]}</svg></span>`;
   const PAGES = {
     profile: `      <div class="set-profile"><button class="avatar big ${pr.photo ? "has-photo" : ""}" id="setPhoto" aria-label="Change profile photo">${avatarInner(pr)}</button>
@@ -1453,6 +1569,8 @@ function openSettings(page){
         <form id="signForm" class="set-inline"><input id="signEmail" type="email" required placeholder="you@example.com" value="${esc(pr.email)}" autocomplete="email"><button class="btn" type="submit">Send link</button></form>
         <p class="set-note" id="signNote"></p>`}`,
     fonts: page === "fonts" ? fontsPage() : "",
+    appearance: `      <p class="set-p">Choose how Intuish looks. Device follows your iPad or computer’s light and dark setting.</p>
+      <div class="fp-row theme-row">${[["", "Device"], ["light", "Light"], ["dark", "Dark"]].map(([k, t]) => `<button class="fp-chip" data-theme-pick="${k}" aria-pressed="${(D.ui.theme || "") === k}">${t}</button>`).join("")}</div>`,
     install: page === "install" ? installPage() : "",
     data: `      <div class="set-row"><button class="btn outline" id="setNotes">Notes</button><button class="btn outline" id="setReset">Erase all my progress</button></div>
       <p class="set-note">Progress, notes and PDFs are saved in this browser.</p>`
@@ -1479,6 +1597,11 @@ function openSettings(page){
     D.profile.email = email; save();
     try { await sendLink(email); note.textContent = `Check ${email} for a link to finish signing up.`; }
     catch(e){ note.textContent = e.message === "offline" ? "Email sign-in is coming soon, so no link was sent yet. We saved your email on this device." : "The link couldn’t be sent. Check the email and try again."; }
+  };
+  if(q(".theme-row")) q(".theme-row").onclick = e => {
+    const b = e.target.closest("[data-theme-pick]"); if(!b) return;
+    D.ui.theme = b.dataset.themePick; save(); applyTheme();
+    q(".theme-row").querySelectorAll(".fp-chip").forEach(c => c.setAttribute("aria-pressed", c === b));
   };
   if(q(".fp")) q(".fp").onclick = e => {
     const b = e.target.closest("[data-font]");
@@ -1522,6 +1645,13 @@ function loadFont(k){
   const f = FONTS[k]; if(!f || !f.g || document.getElementById("gf-" + k)) return;
   const l = document.createElement("link"); l.id = "gf-" + k; l.rel = "stylesheet"; l.href = `https://fonts.googleapis.com/css2?family=${f.g}&display=swap`; document.head.appendChild(l);
 }
+function applyTheme(){
+  const t = D.ui.theme, r = document.documentElement;
+  if(t === "light" || t === "dark") r.dataset.theme = t; else delete r.dataset.theme;
+  const dark = t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+  const m = document.querySelector('meta[name="theme-color"]'); if(m) m.content = dark ? "#0E0E0F" : "#FBFBFA";
+}
+try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme()); } catch(e){}
 function applyFonts(){
   const pick = (D.ui && D.ui.fonts) || {};
   FONT_PARTS.forEach(([part, , , def]) => { const k = FONTS[pick[part]] ? pick[part] : def; loadFont(k); document.documentElement.style.setProperty("--" + part, FONTS[k].stack); });
@@ -1537,7 +1667,7 @@ function fontsPage(){
     </div>`; }).join("")}
     <div><button class="btn outline" id="fontReset">Use the default fonts</button></div></div>`;
 }
-applyFonts();
+applyFonts(); applyTheme();
 
 /* ----- Installable app ----- */
 let installEvt = null;
@@ -1765,7 +1895,21 @@ async function savePdf(list, name, subtitle){
   push(`xref\n0 ${total}\n0000000000 65535 f \n` + offs.slice(1).map(o => String(o).padStart(10, "0") + " 00000 n \n").join(""));
   push(`trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
   const blob = new Blob(parts, {type:"application/pdf"}), file = name + ".pdf";
-  try { const f = new File([blob], file, {type:"application/pdf"}); if(navigator.canShare && navigator.canShare({files:[f]}) && /iPad|iPhone|Macintosh/.test(navigator.userAgent) && "ontouchend" in document){ await navigator.share({files:[f], title:"My Intuish notes"}); return; } } catch(e){ if(e.name === "AbortError") return; }
+  const ios = /iPad|iPhone|Macintosh/.test(navigator.userAgent) && "ontouchend" in document;
+  let f = null; try { f = new File([blob], file, {type:"application/pdf"}); } catch(e){}
+  if(ios && f && navigator.canShare && navigator.canShare({files:[f]})){
+    try { await navigator.share({files:[f], title:"My Intuish notes"}); return; }
+    catch(e){
+      if(e.name === "AbortError") return;
+      // Building the pages can use up the tap that allows sharing, so ask for one more tap
+      const w = sheet(`<div class="sheet-head"><div><div class="eyebrow">Notes</div><h2>Your PDF is ready</h2></div><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
+        <p class="lead" style="margin:0">Tap Save PDF, then choose Save to Files or another app.</p>
+        <div style="display:flex;justify-content:flex-end"><button class="btn" id="pdfShare" data-focus>Save PDF</button></div>`);
+      w.querySelector("#pdfShare").onclick = () => { navigator.share({files:[f], title:"My Intuish notes"}).then(() => w.remove()).catch(er => { if(er.name !== "AbortError"){ w.remove(); window.open(URL.createObjectURL(blob), "_blank"); } }); };
+      return;
+    }
+  }
+  if(ios && window.matchMedia("(display-mode: standalone)").matches){ window.open(URL.createObjectURL(blob), "_blank"); return; }
   download(blob, file); toast(`Notes saved as a PDF (${n} page${n === 1 ? "" : "s"})`);
 }
 function download(blob, name){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
