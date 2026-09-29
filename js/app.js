@@ -33,7 +33,7 @@ const RECALL = [
    hint:"Scrub back to a moment you remember and watch 20 seconds again.",
    model:"A good example is specific: something shown, said or worked through in the lesson.",
    look:["It’s specific","It really connects to the main idea"]},
-  {kind:"Reflection", type:"open", prompt:"What’s one thing you’re still unsure about?",
+  {kind:"Reflection", type:"open", noScore:true, prompt:"What’s one thing you’re still unsure about?",
    hint:"Which part would you skip if you had to teach this?",
    model:"That’s the part to rewatch next. Knowing what you don’t know yet is part of learning.",
    look:["You named something concrete","You know where in the video to look"]}
@@ -105,7 +105,8 @@ function recordAnswer(id, correct, ms, schedule, extra){
 function topicStats(subjId, topic){
   const ls = allLessons().filter(l => l.subj === subjId && l.topic === topic);
   let total = 0, known = 0, seen = 0, right = 0, tries = 0, ms = [];
-  ls.forEach(L => itemsOf(L).forEach((_, i) => {
+  ls.forEach(L => itemsOf(L).forEach((it, i) => {
+    if(it.noScore) return;
     total++; const q = D.q[qid(L, i)];
     if(q){ seen++; if(q.lastCorrect) known++; right += q.right; tries += q.seen; ms = ms.concat(q.ms); }
   }));
@@ -1117,6 +1118,86 @@ function optBtn(text, i, cls, checked, locked, missed){
   const mark = cls === "right" ? `<span class="mark">${ICON.check}</span>` : cls === "wrong" ? `<span class="mark">${X_MARK}</span>` : "";
   return `<button class="opt ${cls}" role="radio" aria-checked="${checked}" data-i="${i}" ${locked ? "disabled" : ""}${tag ? ` aria-label="${esc(text)}, ${tag}"` : ""}><span class="k">${"ABCD"[i]}</span><span class="opt-t">${esc(text)}${tag ? `<small class="opt-tag">${tag}</small>` : ""}</span>${mark}</button>`;
 }
+/* ----- AI checking for written answers -----
+   Multiple choice is checked by the app. Written answers go to an AI (through the Intuish server in js/config.js,
+   which uses Google's Gemini with web search) and only count toward mastery once it has judged them. */
+const AI = window.INTUISH_AI || {url:""};
+const aiReady = () => !!AI.url;
+const AI_SYSTEM = `You check a student's short written answer in a study app. Judge the meaning, not wording, grammar or spelling. Be fair and kind.
+Reply with only JSON, no other text: {"verdict":"right"|"partly"|"wrong","feedback":"one or two short sentences to the student, saying what was right and what was missing or off"}.
+right: accurate and covers the key idea. partly: on track but misses or muddles something important. wrong: incorrect, off topic, or empty.
+Use the lesson material given. If it is not enough, check the facts with web search or your own knowledge before deciding.`;
+async function sourceExcerpt(L){
+  const m = D.meta["src:" + L.id] || {};
+  if(m.ex) return m.ex;
+  let text = "";
+  try { if(kindOf(L) === "pdf" && !L.url){ const b = await PDFS.get(L.id); if(b) text = await withTimeout(readPdfText(b), 30000); } else if(kindOf(L) === "link" || (kindOf(L) === "pdf" && L.url)) text = await readLinkText(L.url); } catch(e){}
+  text = text.replace(/\s+/g, " ").trim().slice(0, 6000);
+  if(text){ D.meta["src:" + L.id] = Object.assign(m, {ex:text, kw:m.kw || topWords(text, 60)}); save(); }
+  return text;
+}
+async function aiGrade(e){
+  if(!aiReady()) throw new Error("off");
+  if(!navigator.onLine) throw new Error("offline");
+  const L = lessonById(e.L) || {}, s = subjById(L.subj) || {}, kind = kindOf(L), vid = kind === "video" ? videoOf(L) : null;
+  const hasModel = !!e.real;
+  const ex = !hasModel && kind !== "video" ? await sourceExcerpt(L) : "";
+  const title = (vid && (D.meta[vid] || {}).title) || L.title || "";
+  const prompt = [`Subject: ${s.name || L.course || ""}`, `Subcategory: ${L.topic || ""}`, `Lesson: ${title}`,
+    L.url ? `Source link: ${L.url}` : vid ? `Source video: https://www.youtube.com/watch?v=${vid}` : "",
+    ex ? `Text from the source:\n${ex}` : "",
+    `Question: ${e.prompt}`,
+    hasModel ? `A strong answer: ${e.model}` : "", hasModel && e.look && e.look.length ? `A teacher would look for: ${e.look.join("; ")}` : "",
+    `Student's answer: ${e.text}`].filter(Boolean).join("\n\n");
+  const req = {system:AI_SYSTEM, prompt, video: !hasModel && vid ? `https://www.youtube.com/watch?v=${vid}` : null, search: !hasModel && !vid && !ex};
+  const r = await withTimeout(fetch(AI.url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(req)}), 90000);
+  if(!r.ok) throw new Error("server " + r.status);
+  const j = await r.json(), m = String(j.text || "").match(/\{[\s\S]*\}/);
+  if(!m) throw new Error("no verdict");
+  const v = JSON.parse(m[0]);
+  if(!["right", "partly", "wrong"].includes(v.verdict)) throw new Error("bad verdict");
+  return {verdict:v.verdict, feedback:String(v.feedback || "").slice(0, 400)};
+}
+function startGrade(q){
+  const st = LS(cur);
+  const e = Qs.entry = {id:qid(cur, RI(st, st.idx)), L:cur.id, prompt:q.prompt, model:q.model, look:q.look, real:!!cur.questions, text:Qs.text.trim(), ms:Qs.ms, t:now()};
+  if(!aiReady()){ Qs.grade = "later"; return; }
+  Qs.grade = "checking";
+  aiGrade(e).then(res => { e.res = res; if(Qs.entry === e){ Qs.grade = "done"; Qs.correct = res.verdict === "right"; if(!Qs.correct) Qs.review = true; if(LS(cur).view === "q") renderQ(); } else applyGrade(e); })
+    .catch(() => { e.failed = true; if(Qs.entry === e){ Qs.grade = "later"; if(LS(cur).view === "q") renderQ(); } });
+}
+// A late verdict: score it, and fix the lesson's saved answer from "waiting" to right or wrong
+function applyGrade(e){
+  if(!e.res || e.applied) return; e.applied = true;
+  const ok = e.res.verdict === "right";
+  recordAnswer(e.id, ok, e.ms, false, {src:"ai", late:true});
+  const st = D.lessons[e.L]; if(st && st.answers && st.answers[e.pos] && st.answers[e.pos].pending) st.answers[e.pos] = {correct:ok, ms:e.ms, ai:e.res.verdict};
+  D.pending = (D.pending || []).filter(x => x.id !== e.id); save();
+}
+let pendingRun = false;
+async function checkPending(){
+  if(pendingRun || !aiReady() || !navigator.onLine || !(D.pending || []).length) return;
+  pendingRun = true; let n = 0;
+  for(const e of D.pending.slice(0, 10)){
+    if(e.res){ applyGrade(e); continue; }
+    try { e.res = await aiGrade(e); applyGrade(e); n++; } catch(err){ if(/off|offline|server 4/.test(err.message)) break; }
+  }
+  pendingRun = false;
+  if(n){ toast(`${n} written answer${n>1?"s":""} checked`); if(!$("#homeView").hidden) renderHome(); }
+}
+function openFeedback(q){
+  const L = cur, verdictBox = (() => {
+    if(q.noScore) return `<p class="muted" style="font-size:13.5px;margin:0">Saved with your notes for this lesson. This one isn’t scored.</p>`;
+    if(Qs.grade === "checking") return `<div class="ai-v checking"><span class="ai-dot"></span>Checking your answer…</div>`;
+    if(Qs.grade === "done" && Qs.entry && Qs.entry.res){ const r = Qs.entry.res, lab = {right:"Correct", partly:"Partly there", wrong:"Not quite"}[r.verdict];
+      return `<div class="ai-v ${r.verdict}"><b>${lab}</b>${r.feedback ? `<span>${esc(r.feedback)}</span>` : ""}</div>`; }
+    return `<div class="ai-v later">${aiReady() ? "Couldn’t reach the AI checker right now." : "AI checking isn’t switched on yet."} Your answer is saved and will count once it’s checked.</div>`;
+  })();
+  return `<div class="feedback${Qs.grade === "done" && Qs.entry && Qs.entry.res ? (Qs.entry.res.verdict === "right" ? " good" : Qs.entry.res.verdict === "wrong" ? " bad" : "") : ""}">${verdictBox}
+    ${L.questions ? `<h3 style="font-size:15px;margin-top:6px">What a teacher would look for</h3><p>${esc(q.model)}</p>
+    <ul style="margin:6px 0 0;padding-left:18px;color:var(--ink-2)">${q.look.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : q.noScore ? `<p>${esc(q.model)}</p>` : ""}
+  </div>`;
+}
 function renderQ(){
   const st = LS(cur), q = curQ(); if(!Qs) newQ();
   const open = q.type === "open", fb = Qs.phase === "feedback";
@@ -1138,12 +1219,8 @@ function renderQ(){
   if(Qs.hint && !fb) html += `<div class="hint" role="note">${ICON.bulb}<span>${esc(q.hint)}</span></div>`;
   if(fb){
     const flag = `<div class="row"><button class="flag" id="flagBtn" aria-pressed="${Qs.review}">${ICON.flag} ${Qs.review?"Marked for review":"Mark for review"}</button></div>`;
-    if(open){
-      html += `<div class="feedback"><h3>${cur.questions ? "What a teacher would look for" : "Check yourself"}</h3><p>${esc(q.model)}</p>
-        <ul style="margin:6px 0 0;padding-left:18px;color:var(--ink-2)">${q.look.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
-        ${Qs.selfRated === null ? `<div class="row"><span class="muted" style="font-size:13.5px">Did your answer cover this?</span><button class="flag" id="rateYes">Mostly, yes</button><button class="flag" id="rateNo">Not really</button></div>` : `<div class="row"><span class="muted" style="font-size:13.5px">${Qs.selfRated ? "Noted." : "Noted. Worth another look at the video."}</span></div>`}
-      </div>`;
-    } else {
+    if(open) html += openFeedback(q);
+    else {
       const cn = Qs.attempts === 1 && !Qs.revealed ? confNote(Qs.correct, Qs.conf) : "", note = cn ? `<p class="conf-note">${cn}</p>` : "";
       if(Qs.correct) html += `<div class="feedback good"><h3>Correct.</h3><p>${esc(q.right)}</p>${note}</div>`;
       else if(Qs.revealed) html += `<div class="feedback"><h3>The answer is ${"ABCD"[q.answer]}.</h3><p>${esc(q.right)}</p>${flag}</div>`;
@@ -1155,7 +1232,7 @@ function renderQ(){
   if(!fb){
     const ready = open ? Qs.text.trim().length > 3 : Qs.selected !== null && (!!Qs.conf || Qs.attempts > 0);
     foot.innerHTML = `<button class="ghost" id="explainBtn" ${Qs.hint?"disabled style='opacity:.45'":""}>${ICON.bulb} Explain</button><span class="grow"></span><button class="btn" id="checkBtn" ${ready?"":"disabled"}>${open?"Compare":"Check Answer"}</button>`;
-  } else if(open) foot.innerHTML = `<span class="grow"></span><button class="btn" id="nextBtn" ${Qs.selfRated===null?"disabled":""}>Continue <span aria-hidden="true">→</span></button>`;
+  } else if(open) foot.innerHTML = `<span class="grow"></span><button class="btn" id="nextBtn">Continue <span aria-hidden="true">→</span></button>`;
   else if(Qs.correct || Qs.revealed) foot.innerHTML = `<span class="grow"></span><button class="btn" id="nextBtn">Continue <span aria-hidden="true">→</span></button>`;
   else foot.innerHTML = `<span class="grow"></span><button class="btn" id="nextBtn">Continue <span aria-hidden="true">→</span></button>`;
 
@@ -1168,8 +1245,6 @@ function renderQ(){
   on("retryBtn", () => { Qs.phase = "answer"; Qs.selected = null; renderQ(); });
   on("revealBtn", () => { Qs.revealed = true; Qs.review = true; renderQ(); });
   on("flagBtn", () => { Qs.review = !Qs.review; renderQ(); });
-  on("rateYes", () => { Qs.selfRated = true; Qs.correct = true; renderQ(); });
-  on("rateNo", () => { Qs.selfRated = false; Qs.correct = false; Qs.review = true; renderQ(); });
 }
 function select(i){ if(Qs.phase !== "answer") return; if(Qs.selected !== null && Qs.selected !== i) Qs.changes++; Qs.selected = i; renderQ(); }
 function check(){
@@ -1179,6 +1254,7 @@ function check(){
   if(!Qs.ms) Qs.ms = now() - Qs.start; // first-attempt response time, collected quietly
   Qs.phase = "feedback";
   if(q.type !== "open"){ Qs.correct = Qs.selected === q.answer; if(!Qs.correct) Qs.review = true; }
+  else if(!q.noScore) startGrade(q);
   renderQ();
   if(Qs.correct && q.type !== "open") spark(body.querySelector(".opt.right"));
   const f = body.querySelector(".feedback"); if(f) f.scrollIntoView({block:"nearest", behavior:"smooth"});
@@ -1186,10 +1262,19 @@ function check(){
 function next(){
   const st = LS(cur), q = curQ(), Q = itemsOf(cur), n = Q.length;
   if(!st.sessionStart) st.sessionStart = Qs.start;
-  const firstTry = !!Qs.correct && Qs.attempts === 1 && !Qs.revealed, ok = q.type === "open" ? !!Qs.selfRated : firstTry;
-  st.answers[st.idx] = {correct:firstTry, ms:Qs.ms, attempts:Qs.attempts, changed:Qs.changes>0, hint:Qs.hint, review:Qs.review, conf:Qs.conf};
-  recordAnswer(qid(cur, RI(st, st.idx)), ok, Qs.ms, !!q.options, {attempts:Qs.attempts, changed:Qs.changes>0, hint:Qs.hint, src:"lesson", conf:Qs.conf || undefined});
-  st.run = ok ? (st.run || 0) + 1 : 0;
+  const firstTry = !!Qs.correct && Qs.attempts === 1 && !Qs.revealed;
+  let ok = firstTry;
+  if(q.type === "open"){
+    // Written answers count only once an AI has checked them; until then they wait in D.pending
+    const e = Qs.entry;
+    if(q.noScore || !e){ st.answers[st.idx] = {skip:true, ms:Qs.ms}; ok = null; }
+    else if(e.res){ ok = e.res.verdict === "right"; st.answers[st.idx] = {correct:ok, ms:Qs.ms, ai:e.res.verdict}; recordAnswer(e.id, ok, e.ms, false, {src:"ai", hint:Qs.hint}); }
+    else { st.answers[st.idx] = {pending:true, ms:Qs.ms}; e.pos = st.idx; D.pending = (D.pending || []).filter(x => x.id !== e.id).concat([e]); ok = null; }
+  } else {
+    st.answers[st.idx] = {correct:firstTry, ms:Qs.ms, attempts:Qs.attempts, changed:Qs.changes>0, hint:Qs.hint, review:Qs.review, conf:Qs.conf};
+    recordAnswer(qid(cur, RI(st, st.idx)), ok, Qs.ms, !!q.options, {attempts:Qs.attempts, changed:Qs.changes>0, hint:Qs.hint, src:"lesson", conf:Qs.conf || undefined});
+  }
+  if(ok !== null) st.run = ok ? (st.run || 0) + 1 : 0;
   st.idx++;
   // Three right in a row: bring the nearest harder question forward.
   if(st.run >= 3 && st.idx < n){
@@ -1204,11 +1289,11 @@ function next(){
   newQ(); save(); render();
 }
 function results(){
-  const st = LS(cur), a = st.answers.filter(Boolean);
+  const st = LS(cur), all = st.answers.filter(Boolean), a = all.filter(x => !x.skip && !x.pending), waiting = all.filter(x => x.pending).length;
   const correct = a.filter(x => x.correct).length, review = a.filter(x => !x.correct || x.review).length;
   const avg = a.length ? a.reduce((s,x) => s + (x.ms||0), 0)/a.length/1000 : 0;
   const mins = Math.max(1, Math.round(((st.finishedAt || now()) - (st.sessionStart || now()))/60000));
-  return {a, correct, review, avg, mins};
+  return {a, correct, review, avg, mins, waiting, scored:a.length};
 }
 function renderBreak(){
   const st = LS(cur), n = itemsOf(cur).length, r = roundAt(n, st.idx - 1);
@@ -1235,7 +1320,7 @@ function renderSummary(){
   body.innerHTML = `<div class="view center-v">
     <p class="prompt" style="font-size:22px">Session complete.</p>
     <div class="big">${r.correct}<small> / ${n}</small></div>
-    <p class="lead">${r.review ? `${r.review} concept${r.review>1?"s":""} to review. ${cur.questions ? "They’ll come back in Remember soon." : ""}` : "Nothing to review. Nice and steady."}</p>
+    <p class="lead">${r.review ? `${r.review} concept${r.review>1?"s":""} to review. ${cur.questions ? "They’ll come back in Remember soon." : ""}` : r.scored ? "Nothing to review. Nice and steady." : ""}${r.waiting ? ` ${r.waiting} written answer${r.waiting>1?"s are":" is"} waiting for an AI check and will count once checked.` : ""}</p>
     <div class="stats">
       <div class="stat"><b>${r.mins} min</b><span>Practicing</span></div>
       <div class="stat"><b>${r.avg.toFixed(1)} sec</b><span>Average response</span></div>
@@ -1930,6 +2015,8 @@ $("#avatarBtn").onclick = e => {
 window.IntuishFsNoteOff = () => { if(!fsNote.hidden) toggleFsNote(false); };
 window.IntuishExtras = {renderAvatar, renderNotes, openNotes, openSettings};
 renderAvatar(); renderNotes(); finishSignIn();
+setTimeout(checkPending, 3000); window.addEventListener("online", checkPending);
+document.addEventListener("visibilitychange", () => { if(document.visibilityState === "visible") checkPending(); });
 
 route();
 })();
