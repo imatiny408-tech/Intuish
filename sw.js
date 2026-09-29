@@ -1,6 +1,6 @@
 // Intuish offline support: keeps the app itself on the device so it opens without a connection.
 // Videos, fonts and sign-in always come from the network.
-const CACHE = "intuish-v22";
+const CACHE = "intuish-v23";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "css/styles.css", "css/app.css",
   "js/art.js", "js/content.js", "js/content2.js", "js/content3.js", "js/config.js", "js/app.js",
   "img/logo.png", "img/favicon.png", "img/apple-touch-icon.png", "img/icon-192.png", "img/icon-512.png", "img/icon-maskable-512.png"];

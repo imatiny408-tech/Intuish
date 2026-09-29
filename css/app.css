@@ -611,3 +611,14 @@ html,body{overscroll-behavior:none}
 .stage:not(.mini):not(.expanded):not(.doc) .lesson.notes-sized .lesson-notes{flex:1 0 var(--notes-h);min-height:0}
 .lesson.notes-big .lesson-head,.lesson.notes-big > h1{opacity:0;max-height:0;margin-bottom:-12px;overflow:hidden;pointer-events:none}
 @media (prefers-reduced-motion:reduce){.lesson .lesson-head,.lesson > h1{transition:none}}
+/* Capture to notes */
+.fs-cap-btn{display:none}
+.stage.expanded .fs-cap-btn{display:grid;place-items:center;position:absolute;z-index:5;right:max(24px,env(safe-area-inset-right,0px));bottom:calc(max(20px,env(safe-area-inset-bottom,0px)) + 130px);width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);color:rgba(255,255,255,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:opacity .25s,background .15s,color .15s}
+.stage.expanded .fs-cap-btn:hover{background:rgba(255,255,255,.2);color:#fff}
+.stage.expanded .player.idle:not(.noting) .fs-cap-btn{opacity:.35}
+.cap-btn.busy,.fs-cap-btn.busy{pointer-events:none;animation:capPulse 1.1s ease-in-out infinite}
+.stage.expanded .fs-cap-btn.busy{background:var(--accent);color:#fff;opacity:1}
+@keyframes capPulse{50%{opacity:.45}}
+@media (prefers-reduced-motion:reduce){.cap-btn.busy,.fs-cap-btn.busy{animation:none;opacity:.6}}
+@container (max-width:360px){ .player-slot .cap-btn{display:none} }
+.stage.expanded .controls .cap-btn{display:none}

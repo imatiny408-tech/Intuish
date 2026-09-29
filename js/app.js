@@ -1273,7 +1273,8 @@ async function geminiDiscover(key){
   } catch(e){ return []; }
 }
 async function geminiDirect(key, req){
-  const parts = []; if(req.video) parts.push(req.lowVideo ? {file_data:{file_uri:req.video}, video_metadata:{fps:0.2}} : {file_data:{file_uri:req.video}}); parts.push({text:req.prompt});
+  const vpart = () => { const p = {file_data:{file_uri:req.video}}; if(req.clip) p.video_metadata = {start_offset:Math.floor(req.clip[0]) + "s", end_offset:Math.ceil(req.clip[1]) + "s", fps:2}; else if(req.lowVideo) p.video_metadata = {fps:0.2}; return p; };
+  const parts = []; if(req.video) parts.push(vpart()); parts.push({text:req.prompt});
   const full = {system_instruction:{parts:[{text:req.system}]}, contents:[{role:"user", parts}], generationConfig:{temperature:0.2, maxOutputTokens:req.maxTokens || 2048}};
   if(req.lowVideo) full.generationConfig.mediaResolution = "MEDIA_RESOLUTION_LOW";
   if(req.search) full.tools = [{google_search:{}}];
@@ -2128,6 +2129,37 @@ function installPage(){
     </div>
     <p class="set-note">Install from Intuish’s website: imatiny408-tech.github.io/Intuish/app</p>`;
 }
+
+/* ----- Capture to notes: the AI looks at the last few seconds of the video (what's on screen and what's said)
+   and writes one useful note, skipping logos, subscribe prompts and anything unrelated ----- */
+const CAP_SYSTEM = `You help a student take notes while watching a lesson video. You get a short clip ending at the moment they tapped "capture".
+Read any text shown on screen (slides, lists, code, diagrams, terms, numbers) and listen to what is said, then write ONE short study note (at most 220 characters) with the useful idea or information, in plain words.
+Keep exact terms, names, numbers and steps from the screen. Match the lesson and the student's existing notes so it fits with them, and don't repeat a note they already have.
+Ignore channel branding, subscribe or like prompts, sponsors, links, captions of the UI and anything unrelated to the lesson. If nothing useful is shown or said, reply {"note":""}.
+Reply with only JSON: {"note":"..."}`;
+let capBusy = false;
+async function captureNote(){
+  if(!cur || kindOf(cur) !== "video") return;
+  if(!aiReady()){ toast("Turn on AI checking to capture notes"); openSettings("ai"); return; }
+  if(capBusy) return;
+  const L = cur, t = P.yt && P.yt.getCurrentTime ? P.yt.getCurrentTime() : P.t, v = videoOf(L);
+  if(!v) return;
+  capBusy = true; document.querySelectorAll("#capBtn,#fsCapBtn").forEach(b => b.classList.add("busy")); toast("Reading the screen…");
+  const mine = D.notes.filter(n => n.lesson === L.id).slice(0, 12).map(n => "- " + n.text).join("\n");
+  try {
+    const out = parseJSON(await aiAsk({system:CAP_SYSTEM, video:`https://www.youtube.com/watch?v=${v}`, needVideo:true, clip:[Math.max(0, t - 12), Math.max(t, 3) + 1], maxTokens:2048,
+      prompt:`Lesson: ${L.title}\nSubject: ${(subjById(L.subj) || {}).name || ""}\nThe student tapped capture at ${fmt(t)}.\nTheir notes so far:\n${mine || "(none yet)"}`}), "{") || {};
+    const text = String(out.note || "").trim();
+    if(!text){ toast("Nothing new to note there"); return; }
+    if(D.notes.length >= NOTE_MAX){ toast(`You can keep up to ${NOTE_MAX} notes`); return; }
+    D.notes.unshift({id:"n" + now().toString(36), text:`${text} (${fmt(t)})`, t:now(), at:Math.round(t), lesson:L.id, subj:L.subj, topic:L.topic, title:L.title, auto:true}); save();
+    if(cur === L){ renderNotes(); const li = document.querySelector("#notesList li"); if(li) li.classList.add("pop"); }
+    toast("Added to your notes");
+  } catch(e){ toast(/429/.test(e.message) ? "Google is busy. Try again in a minute." : "Couldn’t read the video right now"); }
+  finally { capBusy = false; document.querySelectorAll("#capBtn,#fsCapBtn").forEach(b => b.classList.remove("busy")); }
+}
+["#capBtn", "#fsCapBtn"].forEach(id => { const b = $(id); if(!b) return; b.onclick = e => { e.stopPropagation(); captureNote(); }; b.addEventListener("pointerdown", e => e.stopPropagation()); });
+addEventListener("keydown", e => { if((e.key === "c" || e.key === "C") && !e.metaKey && !e.ctrlKey && !/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || "") && cur && !$("#studyView").hidden) captureNote(); });
 
 /* ----- Note bar in full-screen video ----- */
 const fsNote = $("#fsNote"), fsNoteText = $("#fsNoteText"), fsNoteBtn = $("#fsNoteBtn");

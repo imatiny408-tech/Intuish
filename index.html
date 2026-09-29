@@ -98,6 +98,7 @@
         </div>
         <div class="fs-top"><button class="fs-return collapse-btn" id="fsReturn" aria-label="Collapse video" title="Collapse (Esc)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>Collapse</button><b id="fsTitle"></b></div>
         <button class="fs-note-btn" id="fsNoteBtn" aria-label="Write a note" aria-expanded="false" title="Note (N)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></button>
+        <button class="fs-cap-btn" id="fsCapBtn" aria-label="Capture what's on screen into your notes" title="Capture to notes (C)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 10h8M8 14h5"/></svg></button>
         <form class="fs-note" id="fsNote" hidden><input id="fsNoteText" type="text" maxlength="280" autocomplete="off" enterkeyhint="done" placeholder="Add a note about this lesson" aria-label="New note"><button class="note-add" type="submit">Add</button></form>
         <div class="frame" id="frame">
           <div class="yt-host"><div id="yt"></div></div>
@@ -115,6 +116,7 @@
             <button class="ctl" id="muteBtn" aria-label="Mute"></button>
             <input id="vol" type="range" min="0" max="100" value="80" aria-label="Volume">
           </div>
+          <button class="ctl hide-mini cap-btn" id="capBtn" aria-label="Capture what's on screen into your notes" title="Capture to notes (C)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 10h8M8 14h5"/></svg></button>
           <button class="ctl hide-mini" id="speedBtn" aria-label="Playback speed">1×</button>
           <button class="ctl hide-mini expand-btn" id="expandBtn" aria-label="Expand video"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span>Expand</span></button>
           <button class="ctl fs-exit" id="fsExit" aria-label="Exit full screen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
