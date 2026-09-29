@@ -446,3 +446,5 @@ body.in-study{background:radial-gradient(900px 500px at 10% 0%,rgba(12,104,218,.
 .pc-streak.out .flame{filter:grayscale(1) opacity(.3)}
 @media (prefers-reduced-motion: reduce){.opt.spark,.opt.spark::after,.teach-ring .fill{animation:none}.teach-ring .fill{stroke-dashoffset:0}}
 .src-limits{margin:2px 0 0;font-size:12.5px;font-variant-numeric:tabular-nums}
+.sort-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;border-radius:16px;background:var(--soft);font-size:14px}
+.sort-bar span{flex:1;min-width:200px}

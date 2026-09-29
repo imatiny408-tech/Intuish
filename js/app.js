@@ -202,9 +202,9 @@ const COVER_ICONS = [
   [/tense|verb|conjug|past|future|present|time/, '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>'],
   [/number|count|numer|digit/, '<path d="M5 8l2-1.5V17M10 9.5a2 2 0 0 1 4 0c0 2-4 3.5-4 7.5h4M17 7.5h3l-2 3a2.2 2.2 0 1 1-1.8 3.8"/>'],
   [/rhythm|beat|tempo|drum|time signature/, '<path d="M8 20 11 4h2l3 16z"/><path d="M9.6 13.5h4.8M12 13.5l4-6"/>'],
-  [/scale|chord|key|interval|harmon/, '<path d="M4 20h4v-4h4v-4h4V8h4"/><circle cx="6" cy="14" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="14" cy="6" r="1.2"/>'],
+  [/scale|chord|key signature|interval|harmon/, '<path d="M4 20h4v-4h4v-4h4V8h4"/><circle cx="6" cy="14" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="14" cy="6" r="1.2"/>'],
   [/note|staff|clef|music|melod|song/, '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>'],
-  [/test|exam|class|quiz|grade|pass/, '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3.5h6v2H9zM8.5 11l1.5 1.5 3-3M8.5 16.5h7"/>'],
+  [/\b(test|exam|class|quiz|grade|pass)(e?s|ed|ing)?\b/, '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3.5h6v2H9zM8.5 11l1.5 1.5 3-3M8.5 16.5h7"/>'],
   [/every day|daily|habit|practic|routine|little/, '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4M9 15l2 2 4-4"/>'],
   [/real life|world|everyday|travel|use /, '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.4 2.6 14.6 0 17M12 3.5c-2.6 2.4-2.6 14.6 0 17"/>'],
   [/word|vocab|key idea|term|definit|language/, '<path d="M4 18 8.5 6 13 18M5.7 14h5.6M15 10.5c.6-1 1.6-1.5 2.7-1.5 1.7 0 2.8 1 2.8 2.8V18M20.5 13.5c-3.5 0-5.5.6-5.5 2.5 0 1.2.9 2 2.2 2 1.8 0 3.3-1.4 3.3-3.4"/>'],
@@ -399,7 +399,8 @@ function addSourceSheet(subjId, topic, onDone){
   w.querySelector("#srcForm").onsubmit = async ev => {
     ev.preventDefault();
     const url = w.querySelector("#srcUrl").value.trim(), f = pdf.files[0];
-    const name = w.querySelector("#srcName").value.trim(), t = w.querySelector("#srcTopic").value;
+    const name = w.querySelector("#srcName").value.trim();
+    let t = w.querySelector("#srcTopic").value;
     const L = {id:"u"+now().toString(36)+Math.random().toString(36).slice(2,5), subj:subjId, topic:t, course:s.name, custom:true, added:now()};
     if(f){
       if(f.size > 60e6){ toast("That PDF is over 60 MB. Try a smaller one."); return; }
@@ -412,6 +413,8 @@ function addSourceSheet(subjId, topic, onDone){
       else { toast("That doesn’t look like a link"); return; }
       if(v && !name) L.autoTitle = true;
     } else { toast("Paste a link or choose a PDF"); return; }
+    // Left on My sources: file it under the subcategory it clearly matches (the video title arrives later, so videos use the name and link)
+    if(t === MY){ L.topic = MY; D.custom.push(L); const m = sortPlan(subjId).find(x => x.L === L); D.custom.pop(); if(m){ t = m.to; L.topic = t; if(L.autoTitle) L.title = t; } }
     if(cnt[L.kind] >= LIMITS[L.kind]){ if(L.kind === "pdf") PDFS.del(L.id).catch(()=>{}); toast(`You’ve reached ${LIMITS[L.kind]} ${LIMIT_NAME[L.kind][1]} for ${s.name}. Remove one to add another.`); return; }
     D.custom.push(L); save(); w.remove(); toast(`${KIND[L.kind].label} added`); onDone && onDone(L);
   };
@@ -556,6 +559,77 @@ function deleteSubject(s, panel){
   };
 }
 
+/* ----- Sorting sources into subcategories -----
+   Reads what the browser can: video titles (from YouTube), website links, PDF names and the names you gave.
+   Each source goes to the subcategory whose words it shares most; anything unclear stays in My sources. */
+const SORT_STOP = new Set("a an the and or of for to in on at by with from how what why when your you my i me we our is are be it this that these those into about more most better fast faster quickly easy easily ever really very get getting become becoming make making learn learning understand understanding want know using use way ways thing things video tutorial part episode full new best top guide com www http https html pdf youtube watch".split(" "));
+const SORT_SYN = [
+  ["sell","selling","sale","sales","client","clients","customer","price","pricing","freelance","freelancing","business","money","income","portfolio","market","marketing","pitch","commission"],
+  ["brand","branding","logo","logos","identity","mark","wordmark","trademark"],
+  ["advanced","advance","pro","professional","master","mastery","expert","level","next"],
+  ["high","end","luxury","premium","elite","career","designer"],
+  ["basic","basics","beginner","beginners","intro","introduction","fundamental","fundamentals","101","start","starting","first","essentials"],
+  ["key","idea","ideas","term","terms","wording","word","words","vocabulary","glossary","principle","principles","theory","concept","concepts","definition"],
+  ["remember","memory","review","recap","summary","cheat","flashcard","flashcards","retain","forget"],
+  ["practice","practicing","exercise","exercises","challenge","daily","day","habit","routine","drill"],
+  ["test","exam","quiz","class","course","grade","pass","certification"],
+  ["real","life","project","projects","case","study","world","everyday","job","work"]
+];
+const stem = w => w.length > 4 ? w.replace(/(ings|ing|ers|er|ed|es|s)$/,"") : w;
+function sortWords(text){
+  return text.toLowerCase().replace(/https?:\/\//g," ").replace(/[^a-z0-9áéíóúñü]+/g," ").split(" ").filter(w => w.length > 1 && !SORT_STOP.has(w)).map(stem);
+}
+function sourceText(L){
+  const m = D.meta[videoOf(L)] || {};
+  return [L.title !== L.topic ? L.title : "", m.title || "", L.file || "", L.url ? decodeURIComponent(L.url).replace(/^https?:\/\/(www\.)?/,"").replace(/[\/._\-?=&#]+/g," ") : ""].join(" ");
+}
+function sortPlan(subjId){
+  const s = subjById(subjId), topics = topicsOf(s).filter(t => t !== MY);
+  const subjWords = new Set(sortWords(s.name));
+  const goalFor = t => (D.goals[subjId] || []).filter(g => topicName(g) === t).join(" ");
+  const vocab = topics.map(t => {
+    const base = new Set(sortWords(t + " " + goalFor(t)).filter(w => !subjWords.has(w)));
+    SORT_SYN.forEach(g => { const gs = g.map(stem); if(gs.some(w => base.has(w))) gs.forEach(w => base.add(w)); });
+    return base;
+  });
+  const moves = [];
+  sourcesOf(subjId).filter(L => L.topic === MY || !topics.includes(L.topic)).forEach(L => {
+    const words = new Set(sortWords(sourceText(L)).filter(w => !subjWords.has(w)));
+    let best = -1, score = 0;
+    vocab.forEach((v, i) => { let n = 0; words.forEach(w => { if(v.has(w)) n++; }); if(n > score){ score = n; best = i; } });
+    if(best >= 0) moves.push({L, from:L.topic, to:topics[best]});
+  });
+  return moves;
+}
+// Video titles come from YouTube's public oEmbed (falls back to noembed); cached in D.meta so it runs once per video
+async function fetchTitles(subjId){
+  sourcesOf(subjId).forEach(L => { const t = (D.meta[videoOf(L)] || {}).title; if(t && kindOf(L) === "video" && (L.autoTitle || L.title === L.topic)){ L.title = t; delete L.autoTitle; } });
+  const need = sourcesOf(subjId).filter(L => kindOf(L) === "video" && !(D.meta[videoOf(L)] || {}).title).slice(0, 60);
+  await Promise.all(need.map(async L => {
+    const id = videoOf(L), u = `https://www.youtube.com/watch?v=${id}`;
+    for(const api of [`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(u)}`, `https://noembed.com/embed?url=${encodeURIComponent(u)}`]){
+      try { const r = await fetch(api); if(!r.ok) continue; const j = await r.json(); if(!j.title) continue;
+        const m = D.meta[id] || (D.meta[id] = {}); m.title = j.title; if(j.author_name) m.author = j.author_name;
+        if(L.autoTitle || L.title === L.topic){ L.title = j.title; delete L.autoTitle; }
+        return; } catch(e){}
+    }
+  }));
+  if(need.length) save();
+}
+function sortSources(subjId, onDone){
+  fetchTitles(subjId).then(() => {
+    const moves = sortPlan(subjId), left = sourcesOf(subjId).filter(L => L.topic === MY).length - moves.length;
+    if(!moves.length){ toast("None of your sources clearly matched a subcategory. They stay in My sources."); return; }
+    moves.forEach(m => m.L.topic = m.to); save();
+    D._lastSort = {subj:subjId, moves:moves.map(m => ({id:m.L.id, from:m.from}))};
+    onDone && onDone(moves.length, left);
+  });
+}
+function undoSort(onDone){
+  const u = D._lastSort; if(!u) return;
+  u.moves.forEach(m => { const L = lessonById(m.id); if(L) L.topic = m.from; });
+  delete D._lastSort; save(); onDone && onDone();
+}
 function openSubject(id, keepTopic){
   const s = subjById(id), ss = subjStats(s), topics = topicsOf(s);
   document.querySelector(".scrim")?.remove();
@@ -571,6 +645,9 @@ function openSubject(id, keepTopic){
     <div style="display:flex;align-items:center;gap:16px">${ring(ss.pct,84,8)}<div class="segs" style="flex:1">${tStats.map(x => `<i class="${x.st}" style="height:12px;border-radius:6px"></i>`).join("")}</div></div>
     <div class="orbs">${topics.map((t,i) => { const x = tStats[i]; return `<button class="orb" data-i="${i}" aria-pressed="false">${x.lessons.length ? coverFor(s, t, x.lessons, x.st, x.pct, s.id+i) : globe(x.st, x.pct, s.id+i)}<b>${esc(t)}</b><small>${x.seen ? x.pct+"%" : !x.lessons.length ? "Empty" : x.lessons.length > 1 ? x.lessons.length + " lessons" : "New"}</small></button>`; }).join("")}
       <button class="orb orb-add" id="addSub"><span class="globe add-globe"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span><b>Subcategory</b><small>Add</small></button></div>
+    ${(() => { const waiting = mine.filter(L => L.topic === MY).length, others = topics.filter(t => t !== MY).length, last = D._lastSort && D._lastSort.subj === id ? D._lastSort : null;
+      return last ? `<div class="sort-bar"><span>Loaded ${last.moves.length} lesson${last.moves.length>1?"s":""} into your subcategories.${waiting ? ` ${waiting} didn’t clearly fit and stayed in My sources.` : ""}</span><button class="linkish" id="undoSort">Undo</button><button class="linkish" id="okSort">Done</button></div>`
+        : waiting && others ? `<div class="sort-bar"><span>${waiting} source${waiting>1?"s are":" is"} waiting in My sources. Load lessons reads them and puts each one in the subcategory it fits.</span><button class="act h-primary" id="doSort">Load lessons</button></div>` : ""; })()}
     <div id="detail"></div>
     ${starter.length ? `<div class="sec-h" style="margin-top:0"><h3 style="font-size:17px">Starter pack <span class="muted" style="font-weight:600;font-size:14px">${starter.filter(l => kindOf(l)==="video").length} videos · ${starter.filter(l => kindOf(l)==="pdf").length} PDFs · ${starter.filter(l => kindOf(l)==="link").length} websites</span></h3></div>
     <div class="lessons">${starter.map(lessonCard).join("")}</div>` : ""}
@@ -603,6 +680,9 @@ function openSubject(id, keepTopic){
     if(e.target.closest("[data-add-topic]")) return addSourceSheet(id, topics[picked], () => { renderHome(); reopen(); });
     if(e.target.closest("#addSub")) return addSubcategory(id, i => { picked = i; renderHome(); reopen(); });
     if(e.target.closest("[data-del-topic]")){ D.extraTopics[id] = (D.extraTopics[id]||[]).filter(t => t !== topics[picked]); picked = null; save(); renderHome(); return reopen(); }
+    if(e.target.closest("#doSort")){ e.target.closest("#doSort").disabled = true; e.target.closest("#doSort").textContent = "Reading sources…"; return sortSources(id, () => { renderHome(); reopen(); }); }
+    if(e.target.closest("#undoSort")) return undoSort(() => { renderHome(); reopen(); toast("Put back in My sources"); });
+    if(e.target.closest("#okSort")){ delete D._lastSort; save(); return reopen(); }
     if(e.target.closest("#delSubj")) return deleteSubject(s, w);
     if(e.target.closest("#editGoals")) return goalSheet(id, () => { renderHome(); reopen(); });
     if(e.target.closest("a[href^='#/']")) return w.remove();
