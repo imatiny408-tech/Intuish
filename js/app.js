@@ -1249,17 +1249,21 @@ async function geminiDiscover(key){
   } catch(e){ return []; }
 }
 async function geminiDirect(key, req){
-  const parts = []; if(req.video) parts.push({file_data:{file_uri:req.video}}); parts.push({text:req.prompt});
-  const full = {system_instruction:{parts:[{text:req.system}]}, contents:[{role:"user", parts}], generationConfig:{temperature:0.2, maxOutputTokens:2048}};
+  const parts = []; if(req.video) parts.push(req.lowVideo ? {file_data:{file_uri:req.video}, video_metadata:{fps:0.2}} : {file_data:{file_uri:req.video}}); parts.push({text:req.prompt});
+  const full = {system_instruction:{parts:[{text:req.system}]}, contents:[{role:"user", parts}], generationConfig:{temperature:0.2, maxOutputTokens:req.maxTokens || 2048}};
+  if(req.lowVideo) full.generationConfig.mediaResolution = "MEDIA_RESOLUTION_LOW";
   if(req.search) full.tools = [{google_search:{}}];
-  const post = (model, bd) => withTimeout(fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {method:"POST", headers:{"Content-Type":"application/json", "x-goog-api-key":key}, body:JSON.stringify(bd)}), 90000);
+  const post = (model, bd) => withTimeout(fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {method:"POST", headers:{"Content-Type":"application/json", "x-goog-api-key":key}, body:JSON.stringify(bd)}), req.video ? 240000 : 90000);
   geminiOk = geminiOk || (D.ui && D.ui.aiModel) || null;
   const models = [...new Set([geminiOk].concat(GEMINI_MODELS).filter(Boolean))];
   let last = null, found = false;
   for(let mi = 0; mi < models.length; mi++){
     const model = models[mi];
     // Try the full request, then a plain text-only one (no video, no search) if the model refuses those extras
-    const tries = [full]; if(parts.length > 1 || req.search) tries.push({system_instruction:full.system_instruction, contents:[{role:"user", parts:[parts[parts.length - 1]]}], generationConfig:full.generationConfig});
+    const tries = [full];
+    // If this model won't take the light-sampling settings, send the video plainly
+    if(req.lowVideo){ const gc = Object.assign({}, full.generationConfig); delete gc.mediaResolution; tries.push({system_instruction:full.system_instruction, contents:[{role:"user", parts:[{file_data:{file_uri:req.video}}, parts[parts.length - 1]]}], generationConfig:gc}); }
+    if((parts.length > 1 || req.search) && !req.needVideo) tries.push({system_instruction:full.system_instruction, contents:[{role:"user", parts:[parts[parts.length - 1]]}], generationConfig:full.generationConfig});
     for(const bd of tries){
       let r;
       try { r = await post(model, bd); }
@@ -1328,8 +1332,9 @@ Write 5 multiple-choice questions and 1 short-answer question. Test real ideas, 
 Multiple choice: 4 short options, exactly one correct, the others plausible. Vary which position is correct.
 Short answer: the answer must be a specific term, name or number of 1 to 4 words (for example "What does UX stand for?"). Never ask "in your own words", for an example, or for an opinion.
 For videos, the material is a web page copy of the YouTube page: it can include the video's description, links, sponsors, chapter lists, timestamps, comments and page text. Students never see any of that in the app, so ask only about what is said or shown in the video itself (the transcript). Never ask about the description, links, sponsors, chapters, the channel or the upload.
+Never ask about the material itself: not about transcripts, metadata, "lesson material", what is available, the app, or the video's title. If you can't tell what the lesson actually teaches, reply [] instead of guessing.
 Keep every prompt under 20 words. Reply with only JSON.`;
-const quizMaking = new Set(), QUIZ_V = 2; // bump to rewrite older AI quizzes (v2: never from the YouTube description)
+const quizMaking = new Set(), QUIZ_V = 3; // bump to rewrite older AI quizzes (v2: never from the YouTube description)
 const needsQuiz = L => L.custom && (!L.questions || L.quizV !== QUIZ_V);
 async function makeQuiz(L){
   if(!needsQuiz(L) || quizMaking.has(L.id) || !aiReady()) return false;
@@ -1339,9 +1344,19 @@ async function makeQuiz(L){
     let text = ""; try { text = v ? await videoTranscript(L) : await sourceExcerpt(L); } catch(e){}
     const link = L.url || (v ? `https://www.youtube.com/watch?v=${v}` : "");
     const shape = `[{"type":"mc","kind":"Concept","prompt":"…","options":["…","…","…","…"],"answer":0,"hint":"a nudge, not the answer","right":"one sentence on why it's right","wrong":"one sentence pointing back to the idea"},{"type":"short","kind":"Recall","prompt":"…","answer":"the 1 to 4 word answer","hint":"…"}]`;
-    const req = {system:QUIZ_SYSTEM, prompt:`Lesson: ${m.title || L.title}${m.author ? ` by ${m.author}` : ""}\nLink: ${link}\n${text ? `${v ? "YouTube page copy (use only the spoken transcript; ignore the description and everything else)" : "Material"}:\n${text.slice(0, 6000)}` : "No transcript was available, so use the video itself."}\n\nReply as a JSON array like: ${shape}`};
-    if(!text && v) req.video = link;
-    const raw = parseJSON(await aiAsk(req), "[") || [];
+    const head = `Lesson: ${m.title || L.title}${m.author ? ` by ${m.author}` : ""}\nLink: ${link}\n`, tail = `\n\nReply as a JSON array like: ${shape}`;
+    const asks = [];
+    // Videos: the AI watches the video itself (sampled lightly so long videos fit), with the page copy only as extra help
+    if(v) asks.push({system:QUIZ_SYSTEM, video:link, needVideo:true, lowVideo:true, maxTokens:8192,
+      prompt:`${head}Watch this video and write the questions about what it teaches.${text ? `\nA copy of the YouTube page is below. It may or may not contain the spoken transcript; use it only where it matches what is said in the video, and ignore the description and everything else:\n${text.slice(0, 4000)}` : ""}${tail}`});
+    // Pages, PDFs, or a video the AI couldn't watch: the text, but only when there's real content to ask about
+    if(text && text.length >= (v ? 1500 : 300)) asks.push({system:QUIZ_SYSTEM, maxTokens:8192, prompt:`${head}${v ? "YouTube page copy (use only the spoken transcript; ignore the description and everything else)" : "Material"}:\n${text.slice(0, 6000)}${tail}`});
+    const bad = /transcript|metadata|lesson material|\bmaterial\b|description|available|this app|video'?s title|the title/i;
+    let raw = [];
+    for(const req of asks){
+      try { raw = (parseJSON(await aiAsk(req), "[") || []).filter(x => x && !bad.test(String(x.prompt || "") + " " + (x.options || []).join(" "))); } catch(e){ raw = []; }
+      if(raw.filter(x => x.type === "mc").length >= 3) break;
+    }
     const qs = raw.map(x => {
       if(x && x.type === "mc" && Array.isArray(x.options) && x.options.length >= 2 && Number.isInteger(+x.answer) && x.options[+x.answer] != null)
         return {kind:x.kind || "Concept", prompt:String(x.prompt), options:x.options.slice(0, 4).map(String), answer:+x.answer, hint:x.hint || "Think back to the part of the lesson this came from.", right:x.right || "That's it.", wrong:x.wrong || "Not quite. Look back at that part of the lesson."};
