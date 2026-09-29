@@ -132,7 +132,7 @@ window.LESSONS = [
        hint:"What would happen if blood could slosh backwards?",
        right:"Valves act like one-way doors, so blood can’t flow backwards between beats.",
        wrong:"Valves don’t change the blood itself. Think about direction."},
-      {kind:"Recall", type:"open", prompt:"In your own words, trace blood from the body, through the heart and lungs, and back out to the body.",
+      {kind:"Recall", type:"open", prompt:"Trace blood from the body, through the heart and lungs, and back out to the body.",
        hint:"Start at the right atrium.",
        model:"Body → right atrium → right ventricle → pulmonary arteries → lungs (picks up oxygen) → pulmonary veins → left atrium → left ventricle → aorta → body.",
        look:["Right side before the lungs","Lungs in the middle","Left side pumps to the body"]}
