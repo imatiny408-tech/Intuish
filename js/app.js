@@ -187,6 +187,7 @@ const COVER_ICONS = [
   [/lines|memoriz|script|monolog/, '<path d="M7 3h10v18l-5-3-5 3z"/><path d="M10 8h4M10 11h4"/>'],
   [/dialogue|writ|essay|story|screen/, '<path d="M4 20l1.2-4.2L16 5l3 3L8.2 18.8z"/><path d="m14 7 3 3"/>'],
   [/pitch|producer|sell|market/, '<path d="M4 10v4h3l7 4V6L7 10z"/><path d="M17.5 9.5a4 4 0 0 1 0 5"/>'],
+  [/graphic|design|brand|logo|typograph|illustrat|art|draw|paint|color|colour/, '<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-1.1-.9-1.5-.9-2.5 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10.5" cy="7" r="1.2"/><circle cx="15.5" cy="7.5" r="1.2"/>'],
   [/equation|algebra|linear|solve|math|formula/, '<path d="M4 7h6M7 4v6M14 7h6M4 17h6M14 15h6M14 19h6"/>'],
   [/main idea|reading(?! note)|passage|comprehen|book/, '<path d="M3 5.5c3-1.3 6-1.3 9 .5v14c-3-1.8-6-1.8-9-.5z"/><path d="M21 5.5c-3-1.3-6-1.3-9 .5v14c3-1.8 6-1.8 9-.5z"/>'],
   [/govern|civic|constitu|law|branch|history|social stud/, '<path d="M3 10 12 4l9 6z"/><path d="M5 10v8M9.7 10v8M14.3 10v8M19 10v8M3 20h18"/>'],
@@ -212,9 +213,10 @@ const COVER_ICONS = [
 function coverFor(s, topic, lessons, st, pct, key){
   const custom = PALETTE[(s.color|0) % PALETTE.length];
   const [ink, tint, accent] = COVER_TINT[s.id] || [custom[0], custom[1], "#F6C343"];
-  // The subcategory's own name decides first; lesson titles only help when the name says nothing recognizable
+  // The subcategory's own name decides first, then its lesson titles, then the subject's name
   const name = topic.toLowerCase(), titles = lessons.map(l => l.title || "").join(" ").toLowerCase();
-  const hit = COVER_ICONS.find(([re]) => re.test(name)) || COVER_ICONS.find(([re]) => re.test(titles));
+  const subj = s.name.toLowerCase();
+  const hit = COVER_ICONS.find(([re]) => re.test(name)) || COVER_ICONS.find(([re]) => re.test(titles)) || COVER_ICONS.find(([re]) => re.test(subj));
   const glyph = hit ? `<g transform="translate(22 22) scale(2)" fill="none" stroke="${ink}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${hit[1]}</g>`
     : `<text x="46" y="58" text-anchor="middle" font-size="34" font-weight="700" fill="${ink}" font-family="inherit">${esc((topic.trim()[0]||"?").toUpperCase())}</text>`;
   // Mastery shows as a ring around the cover (review items get the dashed coral ring, like everywhere else)
@@ -1462,7 +1464,13 @@ let installEvt = null;
 addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; });
 addEventListener("appinstalled", () => { installEvt = null; });
 if("serviceWorker" in navigator && /^https?:$/.test(location.protocol) && !/claude\.ai|claudeusercontent/.test(location.hostname)){
-  addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  // Check for a new version on every open (and when the app comes back to the front); when one takes over, reload once so it shows right away
+  const hadSW = !!navigator.serviceWorker.controller; let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if(hadSW && !reloaded){ reloaded = true; saveNow(); location.reload(); } });
+  addEventListener("load", () => navigator.serviceWorker.register("sw.js", {updateViaCache:"none"}).then(r => {
+    r.update().catch(() => {});
+    document.addEventListener("visibilitychange", () => { if(!document.hidden) r.update().catch(() => {}); });
+  }).catch(() => {}));
 }
 function installPage(){
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
