@@ -287,6 +287,8 @@ function renderPulse(){
 function renderHome(){
   const due = dueItems().length;
   $("#remPill").hidden = true; $("#remCount").textContent = due; renderPulse();
+  const rl = resumeLesson(), rb = $("#resumeBtn");
+  if(rb){ rb.hidden = !rl; if(rl){ rb.href = `#/study/${rl.id}`; rb.querySelector("b").textContent = rl.title; rb.title = `Resume ${rl.title}`; } }
   const ord = D.order || [], at = s => { const i = ord.indexOf(s.id); return i < 0 ? 1e6 : i; };
   const subs = mySubjects().map((s, i) => [s, i]).sort((a, b) => (at(a[0]) - at(b[0])) || (a[1] - b[1])).map(x => x[0]), many = subs.length > 6;
   $("#grid").classList.toggle("many", many); document.querySelector("#homeView .wrap").classList.toggle("many", many);
@@ -532,6 +534,13 @@ function fixSource(L, onDone){
     const ok = await checkOne(L); setConn(L, !!ok);
     if(ok){ toast("Connected"); done(); } else note.textContent = "That one isn’t reachable either. Check the link and try again.";
   };
+}
+// Lessons you opened most recently come first; the rest keep their order
+const byRecent = list => list.map((L, i) => [L, i]).sort((a, b) => (((D.lessons[b[0].id] || {}).opened || 0) - ((D.lessons[a[0].id] || {}).opened || 0)) || (a[1] - b[1])).map(x => x[0]);
+function resumeLesson(subjId){
+  const L = D.last && lessonById(D.last);
+  if(subjId){ const mine = allLessons().filter(l => l.subj === subjId && (D.lessons[l.id] || {}).opened).sort((a, b) => D.lessons[b.id].opened - D.lessons[a.id].opened)[0]; return mine && LS(mine).view !== "summary" ? mine : null; }
+  return L && LS(L).view !== "summary" && LS(L).view !== "review" ? L : null;
 }
 function lessonCard(L){
   const st = LS(L), m = D.meta[videoOf(L) || ""] || {}, p = m.dur ? Math.min(100, st.t / m.dur * 100) : 0;
@@ -795,7 +804,7 @@ function openSubject(id, keepTopic){
   const s = subjById(id), ss = subjStats(s), topics = topicsOf(s);
   document.querySelector(".scrim")?.remove();
   const w = document.createElement("div"); w.className = "scrim";
-  const starter = LESSONS.filter(l => l.subj === id), mine = sourcesOf(id);
+  const starter = byRecent(LESSONS.filter(l => l.subj === id)), mine = byRecent(sourcesOf(id)), resume = resumeLesson(id);
   const tStats = topics.map(t => topicStats(id, t));
   w.innerHTML = `<div class="h-panel" role="dialog" aria-modal="true" aria-label="${esc(s.name)}">
     <div class="p-head"><div class="art">${artFor(s)}</div>
@@ -815,6 +824,7 @@ function openSubject(id, keepTopic){
           ${left.length ? `<div class="sort-left"><span class="muted">${last.aiFailed ? "The AI couldn’t be reached, so these are still in My sources. Tap Load lessons again later, or choose where they go:" : !aiReady() ? "Turn on AI checking in Settings so these can be sorted for you, or choose where they go:" : "The AI couldn’t tell where these belong. Choose where they go:"}</span>${left.map(L => `<label class="sort-row"><span class="tr-ico">${KIND[kindOf(L)].icon}</span><b>${esc(L.title)}</b><select data-file="${L.id}" aria-label="Subcategory for ${esc(L.title)}"><option value="">My sources</option>${topics.filter(t => t !== MY).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>`).join("")}</div>` : ""}</div>`;
       }
       return waiting && (others || aiReady()) ? `<div class="sort-bar"><span>${waiting} source${waiting>1?"s are":" is"} waiting in My sources. Load lessons reads each one (video titles, website pages and PDF text) and puts it in the subcategory it fits.</span><button class="act h-primary" id="doSort">Load lessons</button></div>` : ""; })()}
+    ${resume ? `<a class="resume-bar" href="#/study/${resume.id}"><span class="rs-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg></span><span class="rs-t"><small>Pick up where you left off</small><b>${esc(resume.title)}</b></span><span class="act h-primary">Resume lesson</span></a>` : ""}
     <div id="detail"></div>
     ${starter.length ? `<div class="sec-h" style="margin-top:0"><h3 style="font-size:17px">Starter pack <span class="muted" style="font-weight:600;font-size:14px">${starter.filter(l => kindOf(l)==="video").length} videos · ${starter.filter(l => kindOf(l)==="pdf").length} PDFs · ${starter.filter(l => kindOf(l)==="link").length} websites</span></h3></div>
     <div class="lessons">${starter.map(lessonCard).join("")}</div>` : ""}
@@ -836,7 +846,7 @@ function openSubject(id, keepTopic){
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div class="h-t"><b>${esc(t)}</b><span>${line}</span></div>
       <button class="act" data-add-topic>${'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'}Add source</button></div>
       ${!x.lessons.length ? `<p class="muted" style="margin:4px 0 0;font-size:14px">Nothing here yet. Add a video, website or PDF about ${esc(t)}.${(D.extraTopics[id]||[]).includes(t) ? ` <button class="linkish" data-del-topic>Remove this subcategory</button>` : ""}</p>` : ""}
-      ${x.lessons.map(L => { const st = LS(L), n = itemsOf(L).length, done = st.view === "summary" || st.view === "review";
+      ${byRecent(x.lessons).map(L => { const st = LS(L), n = itemsOf(L).length, done = st.view === "summary" || st.view === "review";
         return `<div class="topic-row"><span class="tr-ico">${KIND[kindOf(L)].icon}</span><div class="tr-t"><b>${esc(L.title)}${connBadge(L)}</b><span>${done ? "Finished" : st.answers.length ? `Question ${st.idx+1} of ${n}` : `${n} ${L.questions ? "questions" : "recall prompts"}`}</span></div><a class="act h-primary" href="#/ready/${L.id}">${ICON.q}${done ? "Review" : st.answers.length ? "Continue" : "Start"}</a></div>`; }).join("")}
     </div>`;
   };
@@ -1655,6 +1665,8 @@ async function mountDoc(L){
 function openStudy(L){
   const changed = !cur || cur.id !== L.id;
   cur = L;
+  // Remember where you are so Resume can bring you straight back
+  LS(L).opened = now(); D.last = L.id; save();
   if(changed){ newQ(); M.mode = "split"; M.pane = narrowMQ.matches ? "video" : "study"; }
   const isVideo = kindOf(L) === "video";
   stage.classList.toggle("doc", !isVideo);
