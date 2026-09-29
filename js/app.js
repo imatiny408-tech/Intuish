@@ -1125,16 +1125,29 @@ const AI = window.INTUISH_AI || {url:""};
 // Each person can add their own free Google AI key in Settings → AI checking (kept only on their device)
 const aiReady = () => !!(AI.url || (D.ui && D.ui.aiKey));
 // Newest free model first; if Google has retired one (404) or it is busy (5xx), the next one is tried
-const GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
-let geminiOk = null; // the model that last worked on this device
+const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash"];
+let geminiOk = null; // the model that last worked on this device (also saved in D.ui.aiModel)
+// Ask Google which models this key can use, and pick the newest regular "flash" one
+async function geminiDiscover(key){
+  try {
+    const r = await withTimeout(fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {headers:{"x-goog-api-key":key}}), 20000);
+    if(!r.ok) return [];
+    const ms = ((await r.json()).models || []).filter(m => (m.supportedGenerationMethods || []).includes("generateContent")).map(m => m.name.replace(/^models\//, ""))
+      .filter(n => /flash/.test(n) && !/image|tts|audio|live|embed|thinking|exp|8b/.test(n));
+    const ver = n => parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+    return ms.sort((a, b) => (ver(b) - ver(a)) || (/lite|preview/.test(a) - /lite|preview/.test(b)) || (a.length - b.length));
+  } catch(e){ return []; }
+}
 async function geminiDirect(key, req){
   const parts = []; if(req.video) parts.push({file_data:{file_uri:req.video}}); parts.push({text:req.prompt});
   const full = {system_instruction:{parts:[{text:req.system}]}, contents:[{role:"user", parts}], generationConfig:{temperature:0.2, maxOutputTokens:2048}};
   if(req.search) full.tools = [{google_search:{}}];
   const post = (model, bd) => withTimeout(fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {method:"POST", headers:{"Content-Type":"application/json", "x-goog-api-key":key}, body:JSON.stringify(bd)}), 90000);
-  const models = geminiOk ? [geminiOk].concat(GEMINI_MODELS.filter(m => m !== geminiOk)) : GEMINI_MODELS;
-  let last = null;
-  for(const model of models){
+  geminiOk = geminiOk || (D.ui && D.ui.aiModel) || null;
+  const models = [...new Set([geminiOk].concat(GEMINI_MODELS).filter(Boolean))];
+  let last = null, found = false;
+  for(let mi = 0; mi < models.length; mi++){
+    const model = models[mi];
     // Try the full request, then a plain text-only one (no video, no search) if the model refuses those extras
     const tries = [full]; if(parts.length > 1 || req.search) tries.push({system_instruction:full.system_instruction, contents:[{role:"user", parts:[parts[parts.length - 1]]}], generationConfig:full.generationConfig});
     for(const bd of tries){
@@ -1144,14 +1157,20 @@ async function geminiDirect(key, req){
       if(r.ok){
         const j = await r.json(), c = (j.candidates || [])[0] || {};
         const text = ((c.content || {}).parts || []).filter(x => !x.thought).map(x => x.text || "").join("");
-        if(text){ geminiOk = model; return text; }
+        if(text){ if(geminiOk !== model){ geminiOk = model; if(D.ui){ D.ui.aiModel = model; save(); } } return text; }
         last = Object.assign(new Error("empty"), {detail:c.finishReason || ""}); continue;
       }
       let msg = ""; try { msg = ((await r.json()).error || {}).message || ""; } catch(e){}
       last = Object.assign(new Error("server " + r.status), {detail:msg});
       if(r.status === 400 && /api key|API_KEY/i.test(msg)) throw last; // a bad key won't work with any model
       if(r.status === 403 || r.status === 429) throw last;
-      if(r.status === 404) break; // this model is gone: next model
+      if(r.status === 404){
+        // This model is gone. Google's message often names its replacement; otherwise ask Google for the list once.
+        const named = (msg.match(/models\/(gemini-[\w.-]+)/g) || []).map(x => x.replace("models/", "")).filter(n => n !== model && !models.includes(n));
+        named.forEach(n => models.splice(mi + 1, 0, n));
+        if(!found){ found = true; const add = (await geminiDiscover(key)).filter(n => !models.includes(n)); models.splice(mi + 1, 0, ...add); }
+        break;
+      }
     }
   }
   throw last || new Error("network");
@@ -1699,7 +1718,7 @@ function openSettings(page){
     fonts: page === "fonts" ? fontsPage() : "",
     ai: `      <p class="set-p">Written answers are checked by Google’s free Gemini AI before they count toward your progress. Multiple choice doesn’t need this. To turn it on, add your own free key:</p>
       <ol class="ai-steps"><li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and sign in with Google.</li><li>Tap <b>Create API key</b> and copy it.</li><li>Paste it below and tap Save.</li></ol>
-      <form id="aiForm" class="set-col"><input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key (starts with AIza)" value="${esc(D.ui.aiKey || "")}" aria-label="Google AI key">
+      <form id="aiForm" class="set-col"><input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key" value="${esc(D.ui.aiKey || "")}" aria-label="Google AI key">
         <div class="set-row"><button class="btn" type="submit">Save</button>${D.ui.aiKey ? `<button type="button" class="linkish" id="aiRemove">Remove key</button>` : ""}</div>
         <p class="set-note" id="aiNote">${D.ui.aiKey ? "AI checking is on." : "Free, no card needed. Your key stays on this device and is only sent to Google."}${(D.pending || []).length ? ` ${D.pending.length} answer${D.pending.length>1?"s are":" is"} waiting to be checked.` : ""}</p></form>`,
     appearance: `      <p class="set-p">Choose how Intuish looks. Device follows your iPad or computer’s light and dark setting.</p>
