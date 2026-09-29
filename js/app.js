@@ -1059,6 +1059,30 @@ const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
 $("#speedBtn").onclick = () => P.rate(SPEEDS[(SPEEDS.indexOf(D.ui.speed) + 1) % SPEEDS.length]);
 
 /* ----- Layout: split, divider, expand, mini player ----- */
+/* Notes under the video can be resized: drag the grip. When notes take much of the panel, the title fades
+   and the video moves up into its space; the controls always span the panel so nothing gets clipped. */
+function notesSize(){
+  const les = $(".panel.lesson"); if(!les) return;
+  const h = D.ui.notesH, H = les.clientHeight;
+  les.classList.toggle("notes-sized", !!h);
+  if(!h){ les.classList.remove("notes-big"); les.style.removeProperty("--notes-h"); return; }
+  const px = Math.max(90, Math.min(h * H, H - 230));
+  les.style.setProperty("--notes-h", px + "px");
+  les.classList.toggle("notes-big", px > H * 0.4);
+}
+(function notesGrip(){
+  const g = $("#notesGrip"); if(!g) return;
+  let drag = null;
+  g.addEventListener("pointerdown", e => { const les = $(".panel.lesson"); drag = {les, r:les.getBoundingClientRect()}; g.setPointerCapture(e.pointerId); g.classList.add("on"); e.preventDefault(); });
+  g.addEventListener("pointermove", e => { if(!drag) return; const r = drag.r, bottomPad = 16;
+    D.ui.notesH = Math.max(0.12, Math.min(0.8, (r.bottom - bottomPad - e.clientY) / r.height)); notesSize(); });
+  const end = () => { if(!drag) return; drag = null; g.classList.remove("on"); save(); };
+  g.addEventListener("pointerup", end); g.addEventListener("pointercancel", end);
+  g.addEventListener("dblclick", () => { delete D.ui.notesH; notesSize(); save(); });
+  g.addEventListener("keydown", e => { if(e.key !== "ArrowUp" && e.key !== "ArrowDown") return; e.preventDefault();
+    D.ui.notesH = Math.max(0.12, Math.min(0.8, (D.ui.notesH || 0.35) + (e.key === "ArrowUp" ? 0.05 : -0.05))); notesSize(); save(); });
+  addEventListener("resize", notesSize);
+})();
 function layout(){
   app.classList.toggle("narrow", narrowMQ.matches);
   stage.classList.toggle("expanded", M.mode === "expanded");
@@ -1077,7 +1101,7 @@ function layout(){
   const pl = $("#player");
   if(M.mode === "mini" && M.mini){ pl.style.setProperty("--mx", M.mini.x+"px"); pl.style.setProperty("--my", M.mini.y+"px"); pl.style.setProperty("--mr","auto"); pl.style.setProperty("--mb","auto"); }
   else ["--mx","--my","--mr","--mb"].forEach(p => pl.style.removeProperty(p));
-  syncFullscreen(); wake(); save();
+  notesSize(); syncFullscreen(); wake(); save();
 }
 narrowMQ.addEventListener ? narrowMQ.addEventListener("change", layout) : narrowMQ.addListener(layout);
 // One pattern for every expanded view (video, questions, and anything added later):

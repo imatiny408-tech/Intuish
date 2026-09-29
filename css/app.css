@@ -596,3 +596,18 @@ html,body{overscroll-behavior:none}
 @media (max-width:700px){.p-head-r .resume-pill span{display:none}.p-head-r .resume-pill{padding:0 12px}}
 .short-ans{width:100%;height:48px;border:1.5px solid var(--line);border-radius:var(--r-md);padding:0 16px;font:inherit;font-size:16px;background:var(--surface);color:var(--ink)}
 .short-ans:focus{border-color:var(--ink);outline:none}
+/* Resizable notes + controls that never clip */
+.stage:not(.mini):not(.expanded) .player{width:100%}
+.stage:not(.mini):not(.expanded) .player .frame{width:min(100%,calc((100cqh - 54px) * 16 / 9));margin-inline:auto}
+.stage:not(.mini):not(.expanded) .player .controls{width:100%;min-width:0}
+.stage:not(.mini):not(.expanded) .player .scrub{min-width:40px;flex:1 1 60px}
+@container (max-width:360px){ .player-slot .time{display:none} }
+.notes-grip{flex:none;height:14px;margin:-6px 0 -8px;display:flex;align-items:center;justify-content:center;cursor:row-resize;touch-action:none}
+.notes-grip span{width:44px;height:5px;border-radius:3px;background:var(--line);transition:background .15s,width .15s}
+.notes-grip:hover span,.notes-grip.on span,.notes-grip:focus-visible span{background:var(--muted);width:56px}
+.stage.expanded .notes-grip,.stage.mini .notes-grip,.stage.doc .notes-grip{display:none}
+.lesson .lesson-head,.lesson > h1{transition:opacity .25s ease,max-height .3s ease,margin .3s ease;max-height:240px}
+.stage:not(.mini):not(.expanded) .lesson.notes-sized .player-slot{flex:100 1 0;height:auto;min-height:110px;max-height:calc(100cqw * 9 / 16 + 54px)}
+.stage:not(.mini):not(.expanded):not(.doc) .lesson.notes-sized .lesson-notes{flex:1 0 var(--notes-h);min-height:0}
+.lesson.notes-big .lesson-head,.lesson.notes-big > h1{opacity:0;max-height:0;margin-bottom:-12px;overflow:hidden;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.lesson .lesson-head,.lesson > h1{transition:none}}
