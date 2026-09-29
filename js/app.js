@@ -287,7 +287,8 @@ function renderPulse(){
 function renderHome(){
   const due = dueItems().length;
   $("#remPill").hidden = true; $("#remCount").textContent = due; renderPulse();
-  const subs = mySubjects(), many = subs.length > 6;
+  const ord = D.order || [], at = s => { const i = ord.indexOf(s.id); return i < 0 ? 1e6 : i; };
+  const subs = mySubjects().map((s, i) => [s, i]).sort((a, b) => (at(a[0]) - at(b[0])) || (a[1] - b[1])).map(x => x[0]), many = subs.length > 6;
   $("#grid").classList.toggle("many", many); document.querySelector("#homeView .wrap").classList.toggle("many", many);
   $("#grid").innerHTML = subs.map(s => {
     const ss = subjStats(s), d = dueItems(s.id).length;
@@ -299,9 +300,32 @@ function renderHome(){
         <div class="segs">${topicsOf(s).map(t => `<i class="${topicStats(s.id,t).st}" title="${esc(t)}"></i>`).join("")}</div>
       </div>
     </button>`;
-  }).join("") + `<button class="tile-add" id="tileAdd"><span><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>Add a subject</button>`;
+  }).join("") + `<button class="tile-add" id="tileAdd" ${arranging ? "hidden" : ""}><span><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>Add a subject</button>`;
+  $("#grid").classList.toggle("arranging", arranging);
+  const ab = $("#arrangeBtn"); if(ab){ ab.textContent = arranging ? "Done" : "Arrange"; ab.classList.toggle("on", arranging); ab.hidden = subs.length < 2; }
   fitHome();
 }
+/* ----- Arrange: drag subject tiles into your own order (saved in D.order) ----- */
+let arranging = false, drag = null;
+function saveOrder(){ D.order = [...$("#grid").querySelectorAll(".tile")].map(t => t.dataset.id); save(); }
+$("#grid").addEventListener("pointerdown", e => {
+  if(!arranging) return; const t = e.target.closest(".tile"); if(!t) return;
+  e.preventDefault(); const r = t.getBoundingClientRect();
+  const ghost = t.cloneNode(true); ghost.classList.add("tile-ghost"); Object.assign(ghost.style, {width:r.width + "px", height:r.height + "px", left:r.left + "px", top:r.top + "px"});
+  document.body.appendChild(ghost); t.classList.add("tile-hole");
+  drag = {t, ghost, dx:e.clientX - r.left, dy:e.clientY - r.top, id:e.pointerId};
+  try { t.setPointerCapture(e.pointerId); } catch(err){}
+});
+addEventListener("pointermove", e => {
+  if(!drag || e.pointerId !== drag.id) return;
+  drag.ghost.style.left = (e.clientX - drag.dx) + "px"; drag.ghost.style.top = (e.clientY - drag.dy) + "px";
+  const tiles = [...$("#grid").querySelectorAll(".tile")].filter(x => x !== drag.t);
+  const over = tiles.find(x => { const b = x.getBoundingClientRect(); return e.clientX > b.left && e.clientX < b.right && e.clientY > b.top && e.clientY < b.bottom; });
+  if(over){ const b = over.getBoundingClientRect(), after = e.clientX > b.left + b.width / 2; over.parentNode.insertBefore(drag.t, after ? over.nextSibling : over); }
+});
+const endDrag = e => { if(!drag || (e && e.pointerId !== drag.id)) return; drag.ghost.remove(); drag.t.classList.remove("tile-hole"); drag = null; saveOrder(); };
+addEventListener("pointerup", endDrag); addEventListener("pointercancel", endDrag);
+$("#arrangeBtn").onclick = () => { arranging = !arranging; if(!arranging) toast("Order saved"); renderHome(); };
 // Home shows every subject on one screen: pick the column count that keeps tiles as large as possible
 function fitHome(){
   const g = $("#grid"); if(!g) return;
@@ -333,7 +357,7 @@ function pickSubjectPhoto(id, done){
   };
   inp.click();
 }
-$("#grid").addEventListener("click", e => { if(e.target.closest(".tile-add")) return createSubject(); const t = e.target.closest(".tile"); if(t) openSubjectAsk(t.dataset.id); });
+$("#grid").addEventListener("click", e => { if(arranging) return; if(e.target.closest(".tile-add")) return createSubject(); const t = e.target.closest(".tile"); if(t) openSubjectAsk(t.dataset.id); });
 $("#addSubj").onclick = () => createSubject();
 $("#avatarBtn").onclick = e => {
   e.stopPropagation();
@@ -432,7 +456,9 @@ function addSourceSheet(subjId, topic, onDone){
     // Left on My sources: file it under the subcategory it clearly matches (the video title arrives later, so videos use the name and link)
     if(t === MY){ L.topic = MY; D.custom.push(L); const m = sortPlan(subjId).find(x => x.L === L); D.custom.pop(); if(m){ t = m.to; L.topic = t; if(L.autoTitle) L.title = t; } }
     if(cnt[L.kind] >= LIMITS[L.kind]){ if(L.kind === "pdf") PDFS.del(L.id).catch(()=>{}); toast(`You’ve reached ${LIMITS[L.kind]} ${LIMIT_NAME[L.kind][1]} for ${s.name}. Remove one to add another.`); return; }
-    D.custom.push(L); save(); w.remove(); toast(`${KIND[L.kind].label} added`); onDone && onDone(L);
+    D.custom.push(L); save(); w.remove(); toast(`${KIND[L.kind].label} added`);
+    checkOne(L).then(ok => { if(ok === null) return; setConn(L, ok); save(); document.querySelectorAll(`[data-conn="${L.id}"]`).forEach(n => { n.outerHTML = connBadge(L); }); if(ok === false) toast(`${L.title} isn’t connected. Tap the red mark to fix it.`); });
+    onDone && onDone(L);
   };
 }
 function removeSource(L, onDone){
@@ -450,11 +476,68 @@ function sourceThumb(L){
   if(kindOf(L) === "video") return thumbImg(L);
   return `<span class="src-thumb ${kindOf(L)}">${KIND[kindOf(L)].icon.replace(/width="16" height="16"/, 'width="34" height="34"')}<b>${esc(kindOf(L) === "link" ? hostOf(L.url) : "PDF")}</b></span>`;
 }
+/* ----- Connected check: every source you add shows a green check when it can be reached ----- */
+const CONN_OK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+// Saved per source id in D.conn, so starter sources get checked too
+const connOf = L => ((D.conn || {})[L.id] || {}).ok;
+function setConn(L, ok){ D.conn = D.conn || {}; D.conn[L.id] = {ok, at:now()}; }
+function connBadge(L){
+  const c = connOf(L);
+  return c === true ? `<span class="conn ok" data-conn="${L.id}" title="Connected" aria-label="Connected">${CONN_OK}</span>`
+    : c === false ? `<button class="conn bad" data-conn="${L.id}" data-fix="${L.id}" aria-label="Not connected. Fix it">!</button>`
+    : `<span class="conn wait" data-conn="${L.id}" aria-label="Checking"></span>`;
+}
+async function checkOne(L){
+  const k = kindOf(L);
+  try {
+    if(k === "pdf" && !L.url) return !!(await PDFS.get(L.id));
+    if(k === "video"){
+      const r = await withTimeout(fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent("https://www.youtube.com/watch?v=" + videoOf(L))}`), 12000);
+      if(r.ok){ const j = await r.json(); const m = D.meta[videoOf(L)] || (D.meta[videoOf(L)] = {}); if(j.title && !m.title) m.title = j.title; if(j.author_name && !m.author) m.author = j.author_name; return true; }
+      return r.status >= 500 ? null : false; // private, removed or not a real video
+    }
+    // Websites and online PDFs: an opaque request succeeds when the site answers at all
+    await withTimeout(fetch(L.url, {mode:"no-cors", cache:"no-store"}), 12000); return true;
+  } catch(e){ return navigator.onLine ? false : null; }
+}
+async function checkConnections(subjId, root, force){
+  const list = allLessons().filter(L => L.subj === subjId && (force || connOf(L) == null || now() - ((D.conn || {})[L.id] || {}).at > 864e5));
+  for(const L of list){
+    const ok = await checkOne(L); if(ok === null) continue;
+    setConn(L, ok);
+    root && root.querySelectorAll(`[data-conn="${L.id}"]`).forEach(n => { n.outerHTML = connBadge(L); });
+  }
+  if(list.length) save();
+}
+function fixSource(L, onDone){
+  const k = kindOf(L), what = k === "video" ? "YouTube video" : k === "pdf" ? "PDF" : "website", canReplace = L.custom || k === "video";
+  const w = sheet(`<div class="sheet-head"><div><div class="eyebrow">Not connected</div><h2>${esc(L.title)}</h2></div><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
+    <p class="lead" style="margin:0">${k === "video" ? "This video can’t be reached. It may be private, removed, or the link was cut off." : k === "pdf" ? "This PDF isn’t saved on this device anymore." : "This website didn’t answer. The link may be wrong or the site may be down."} Replace it and your progress stays with the lesson.</p>
+    ${canReplace ? "" : `<p class="set-note" style="margin:0">This is a starter source, so it can’t be replaced here. Try again later.</p>`}
+    <form id="fixForm" class="set-col">${!canReplace ? "" : k === "pdf" && !L.url ? `<input type="file" id="fixPdf" accept="application/pdf,.pdf">` : `<input id="fixUrl" type="url" placeholder="Paste the ${what} link" value="${esc(L.url || (k === "video" ? "https://www.youtube.com/watch?v=" + videoOf(L) : ""))}">`}
+      <div class="set-row">${canReplace ? `<button class="btn" type="submit">Replace</button>` : ""}<button type="button" class="btn outline" id="fixAgain">Check again</button>${L.custom ? `<button type="button" class="linkish" id="fixRemove">Remove</button>` : ""}</div>
+      <p class="set-note" id="fixNote"></p></form>`);
+  const note = w.querySelector("#fixNote"), done = () => { save(); w.remove(); onDone && onDone(); };
+  w.querySelector("#fixAgain").onclick = async () => { note.textContent = "Checking…"; const ok = await checkOne(L); if(ok){ setConn(L, true); toast("Connected"); done(); } else note.textContent = "Still not connected."; };
+  const fr = w.querySelector("#fixRemove"); if(fr) fr.onclick = () => { w.remove(); removeSource(L, onDone); };
+  w.querySelector("#fixForm").onsubmit = async ev => {
+    ev.preventDefault(); note.textContent = "Checking…";
+    const f = w.querySelector("#fixPdf"), u = w.querySelector("#fixUrl");
+    if(f){ if(!f.files[0]){ note.textContent = "Choose a PDF first."; return; } try { await PDFS.put(L.id, f.files[0]); L.file = f.files[0].name; } catch(e){ note.textContent = "Couldn’t save the PDF. Your device may be out of space."; return; } }
+    else {
+      const url = u.value.trim(), v = parseYouTube(url);
+      if(k === "video"){ if(!v){ note.textContent = "That isn’t a YouTube link."; return; } if(L.custom){ L.videoId = v; delete L.autoTitle; } else { D.override[L.id] = v; LS(L).t = 0; } }
+      else if(/^https?:\/\/\S+\.\S+/i.test(url)) L.url = url; else { note.textContent = "That doesn’t look like a link."; return; }
+    }
+    const ok = await checkOne(L); setConn(L, !!ok);
+    if(ok){ toast("Connected"); done(); } else note.textContent = "That one isn’t reachable either. Check the link and try again.";
+  };
+}
 function lessonCard(L){
   const st = LS(L), m = D.meta[videoOf(L) || ""] || {}, p = m.dur ? Math.min(100, st.t / m.dur * 100) : 0;
   const sub = kindOf(L) === "video" ? (m.author || L.course) : kindOf(L) === "link" ? hostOf(L.url) : (L.file || (L.url ? hostOf(L.url) : "PDF"));
   return `<div class="vcard-wrap"><a class="vcard" href="#/ready/${L.id}"><div class="vthumb">${sourceThumb(L)}<span class="vtag">${esc(L.topic)}</span>${p>1?`<span class="vprog"><b style="width:${p}%"></b></span>`:""}</div>
-    <div class="vmeta"><span class="av" style="background:var(--ink)">${KIND[kindOf(L)].icon.replace(/currentColor/g, "#fff")}</span><div><b>${esc(L.title)}</b><span>${esc(sub)}</span></div></div></a>
+    <div class="vmeta"><span class="av" style="background:var(--ink)">${KIND[kindOf(L)].icon.replace(/currentColor/g, "#fff")}</span><div><b>${esc(L.title)}</b><span>${esc(sub)}</span></div>${connBadge(L)}</div></a>
     ${L.custom ? `<button class="src-x" data-remove="${L.id}" aria-label="Remove ${esc(L.title)}">${ICON.close}</button>` : ""}</div>`;
 }
 
@@ -754,9 +837,10 @@ function openSubject(id, keepTopic){
       <button class="act" data-add-topic>${'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'}Add source</button></div>
       ${!x.lessons.length ? `<p class="muted" style="margin:4px 0 0;font-size:14px">Nothing here yet. Add a video, website or PDF about ${esc(t)}.${(D.extraTopics[id]||[]).includes(t) ? ` <button class="linkish" data-del-topic>Remove this subcategory</button>` : ""}</p>` : ""}
       ${x.lessons.map(L => { const st = LS(L), n = itemsOf(L).length, done = st.view === "summary" || st.view === "review";
-        return `<div class="topic-row"><span class="tr-ico">${KIND[kindOf(L)].icon}</span><div class="tr-t"><b>${esc(L.title)}</b><span>${done ? "Finished" : st.answers.length ? `Question ${st.idx+1} of ${n}` : `${n} ${L.questions ? "questions" : "recall prompts"}`}</span></div><a class="act h-primary" href="#/ready/${L.id}">${ICON.q}${done ? "Review" : st.answers.length ? "Continue" : "Start"}</a></div>`; }).join("")}
+        return `<div class="topic-row"><span class="tr-ico">${KIND[kindOf(L)].icon}</span><div class="tr-t"><b>${esc(L.title)}${connBadge(L)}</b><span>${done ? "Finished" : st.answers.length ? `Question ${st.idx+1} of ${n}` : `${n} ${L.questions ? "questions" : "recall prompts"}`}</span></div><a class="act h-primary" href="#/ready/${L.id}">${ICON.q}${done ? "Review" : st.answers.length ? "Continue" : "Start"}</a></div>`; }).join("")}
     </div>`;
   };
+  checkConnections(id, w);
   w.addEventListener("change", e => {
     const sel = e.target.closest("[data-file]"); if(!sel || !sel.value) return;
     const L = lessonById(sel.dataset.file); if(!L) return;
@@ -765,6 +849,7 @@ function openSubject(id, keepTopic){
   });
   w.addEventListener("click", e => {
     if(e.target === w || e.target.closest(".x")) return w.remove();
+    const fx = e.target.closest("[data-fix]"); if(fx){ e.preventDefault(); e.stopPropagation(); return fixSource(lessonById(fx.dataset.fix), () => { renderHome(); reopen(); }); }
     const rm = e.target.closest("[data-remove]"); if(rm){ e.preventDefault(); removeSource(lessonById(rm.dataset.remove), () => { renderHome(); reopen(); }); return; }
     if(e.target.closest("#addSrc")) return addSourceSheet(id, picked != null ? topics[picked] : MY, () => { renderHome(); reopen(); });
     if(e.target.closest("[data-add-topic]")) return addSourceSheet(id, topics[picked], () => { renderHome(); reopen(); });
