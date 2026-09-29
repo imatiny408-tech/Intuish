@@ -37,12 +37,49 @@ const STARTER = "psych";   // the one example subject every new user starts with
 const fresh = () => ({v:1, shown:[STARTER], lessons:{}, q:{}, hist:[], custom:[], override:{}, meta:{}, subjects:[], extraTopics:{}, goals:{}, goalTopics:{}, ui:{split:.5, speed:1, vol:80, muted:false}, timer:null});
 let D;
 try { D = JSON.parse(localStorage.getItem(KEY)); } catch(e) { D = null; }
+const HAD_DATA = !!D;
 if(!D || D.v !== 1) D = fresh();
 else if(!D.shown) D.shown = SUBJECTS.map(s => s.id);   // saves from before the one-starter-subject change keep every subject
 D = Object.assign(fresh(), D);
 let saveT = 0;
 function save(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 200); }
-function saveNow(){ try { localStorage.setItem(KEY, JSON.stringify(D)); } catch(e){} }
+let fullWarned = false;
+function saveNow(){
+  const json = JSON.stringify(D);
+  try { localStorage.setItem(KEY, json); } catch(e){ if(!fullWarned){ fullWarned = true; setTimeout(() => toast("This device’s storage for Intuish is full. Your work is kept in the backup copy."), 0); } }
+  BACKUP.put(json);
+}
+/* A second copy of everything in IndexedDB, so progress survives if the main storage is cleared or full.
+   When the main copy is missing on start, the backup is restored automatically. */
+const BACKUP = (() => {
+  let ready = false, pending = null, t = 0;
+  const open = () => new Promise((res, rej) => { const r = indexedDB.open("intuish-backup", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const tx = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => { const x = db.transaction("kv", mode), st = x.objectStore("kv"), out = fn(st); x.oncomplete = () => res(out && out.result); x.onerror = () => rej(x.error); }); };
+  const write = async json => {
+    try {
+      const day = new Date().toDateString();
+      await tx("readwrite", st => { st.put(json, "D"); st.put(Date.now(), "at"); });
+      // Also keep yesterday's copy, in case something goes wrong today
+      const last = await tx("readonly", st => st.get("day"));
+      if(last !== day) await tx("readwrite", st => { st.put(json, "D:day"); st.put(day, "day"); });
+    } catch(e){}
+  };
+  return {
+    put(json){ pending = json; if(!ready) return; clearTimeout(t); t = setTimeout(() => { const j = pending; pending = null; if(j) write(j); }, 1500); },
+    get: async key => { try { return await tx("readonly", st => st.get(key || "D")); } catch(e){ return null; } },
+    clear: async () => { try { await tx("readwrite", st => st.clear()); } catch(e){} },
+    start(){ ready = true; if(pending) this.put(pending); }
+  };
+})();
+const richData = x => !!x && x.v === 1 && ((x.subjects || []).length || (x.custom || []).length || Object.keys(x.lessons || {}).length || (x.notes || []).length || (x.profile && (x.profile.name || x.profile.photo)));
+(async () => {
+  if(!HAD_DATA && typeof indexedDB !== "undefined"){
+    const json = await BACKUP.get("D"); let b = null; try { b = JSON.parse(json); } catch(e){}
+    if(richData(b)){ try { localStorage.setItem(KEY, json); } catch(e){} sessionStorage.setItem("intuish.restored", "1"); location.reload(); return; }
+  }
+  BACKUP.start();
+  if(sessionStorage.getItem("intuish.restored")){ sessionStorage.removeItem("intuish.restored"); setTimeout(() => toast("Your progress was restored from the backup copy"), 600); }
+})();
 
 const allLessons = () => LESSONS.concat(D.custom);
 const lessonById = id => allLessons().find(l => l.id === id);
@@ -1980,7 +2017,9 @@ function openSettings(page){
       <div class="fp-row theme-row">${[["", "Device"], ["light", "Light"], ["dark", "Dark"]].map(([k, t]) => `<button class="fp-chip" data-theme-pick="${k}" aria-pressed="${(D.ui.theme || "") === k}">${t}</button>`).join("")}</div>`,
     install: page === "install" ? installPage() : "",
     data: `      <div class="set-row"><button class="btn outline" id="setNotes">Notes</button><button class="btn outline" id="setReset">Erase all my progress</button></div>
-      <p class="set-note">Progress, notes and PDFs are saved in this browser.</p>`
+      <p class="set-note">Progress, notes and PDFs are saved in this browser, with a backup copy kept on this device. On iPad, the Home Screen app and a Safari tab each keep their own copy.</p>
+      <div class="set-row"><button class="btn outline" id="setExport">Save a backup file</button><label class="btn outline" for="setImport" style="cursor:pointer">Restore from a file</label><input type="file" id="setImport" accept=".json,application/json" hidden></div>
+      <p class="set-note" id="bkNote">A backup file lets you move everything to the other copy or to another device. PDFs stay on this device.</p>`
   };
   const cur = SET_PAGES.find(x => x[0] === page);
   const w = sheet(cur
@@ -2047,6 +2086,21 @@ function openSettings(page){
     const b = e.target.closest("[data-sp]"); if(b) pickSubjectPhoto(b.dataset.sp, again);
   };
   if(q("#setNotes")) q("#setNotes").onclick = () => { w.remove(); openNotes(true); };
+  if(q("#setExport")) q("#setExport").onclick = () => {
+    const blob = new Blob([JSON.stringify(D)], {type:"application/json"}), a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `intuish-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    q("#bkNote").textContent = "Backup file saved. Keep it in Files, then use Restore from a file wherever you want your progress.";
+  };
+  if(q("#setImport")) q("#setImport").onchange = async e => {
+    const f = e.target.files[0]; if(!f) return; let b = null;
+    try { b = JSON.parse(await f.text()); } catch(err){}
+    if(!b || b.v !== 1){ q("#bkNote").textContent = "That file isn’t an Intuish backup."; return; }
+    const n = (b.subjects || []).length, c = sheet(`<div class="sheet-head"><h2>Restore this backup?</h2><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
+      <p class="lead" style="margin:0">It replaces what’s here now with the backup${n ? ` (${n} of your own subject${n > 1 ? "s" : ""}, ${(b.notes || []).length} notes)` : ""}.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn outline" data-close data-focus>Cancel</button><button class="btn" id="doRestore">Restore</button></div>`);
+    c.querySelector("#doRestore").onclick = () => { D = Object.assign(fresh(), b); saveNow(); setTimeout(() => location.reload(), 300); };
+  };
   if(q("#setReset")) q("#setReset").onclick = () => {
     const c = sheet(`<div class="sheet-head"><h2>Erase all progress?</h2><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
       <p class="lead" style="margin:0">This clears your answers, Remember schedule, sources and notes on this device. Your profile and subject photos stay.</p>
