@@ -1327,17 +1327,19 @@ const QUIZ_SYSTEM = `You write quiz questions for a calm study app, from one les
 Write 5 multiple-choice questions and 1 short-answer question. Test real ideas, facts and terms that the lesson actually teaches, not trivia like timestamps or what the presenter wore.
 Multiple choice: 4 short options, exactly one correct, the others plausible. Vary which position is correct.
 Short answer: the answer must be a specific term, name or number of 1 to 4 words (for example "What does UX stand for?"). Never ask "in your own words", for an example, or for an opinion.
+For videos, the material is a web page copy of the YouTube page: it can include the video's description, links, sponsors, chapter lists, timestamps, comments and page text. Students never see any of that in the app, so ask only about what is said or shown in the video itself (the transcript). Never ask about the description, links, sponsors, chapters, the channel or the upload.
 Keep every prompt under 20 words. Reply with only JSON.`;
-const quizMaking = new Set();
+const quizMaking = new Set(), QUIZ_V = 2; // bump to rewrite older AI quizzes (v2: never from the YouTube description)
+const needsQuiz = L => L.custom && (!L.questions || L.quizV !== QUIZ_V);
 async function makeQuiz(L){
-  if(L.questions || !L.custom || quizMaking.has(L.id) || !aiReady()) return false;
+  if(!needsQuiz(L) || quizMaking.has(L.id) || !aiReady()) return false;
   quizMaking.add(L.id);
   try {
     const v = kindOf(L) === "video" ? videoOf(L) : null, m = (v && D.meta[v]) || {};
     let text = ""; try { text = v ? await videoTranscript(L) : await sourceExcerpt(L); } catch(e){}
     const link = L.url || (v ? `https://www.youtube.com/watch?v=${v}` : "");
     const shape = `[{"type":"mc","kind":"Concept","prompt":"…","options":["…","…","…","…"],"answer":0,"hint":"a nudge, not the answer","right":"one sentence on why it's right","wrong":"one sentence pointing back to the idea"},{"type":"short","kind":"Recall","prompt":"…","answer":"the 1 to 4 word answer","hint":"…"}]`;
-    const req = {system:QUIZ_SYSTEM, prompt:`Lesson: ${m.title || L.title}${m.author ? ` by ${m.author}` : ""}\nLink: ${link}\n${text ? `Material:\n${text.slice(0, 6000)}` : "No transcript was available, so use the video itself."}\n\nReply as a JSON array like: ${shape}`};
+    const req = {system:QUIZ_SYSTEM, prompt:`Lesson: ${m.title || L.title}${m.author ? ` by ${m.author}` : ""}\nLink: ${link}\n${text ? `${v ? "YouTube page copy (use only the spoken transcript; ignore the description and everything else)" : "Material"}:\n${text.slice(0, 6000)}` : "No transcript was available, so use the video itself."}\n\nReply as a JSON array like: ${shape}`};
     if(!text && v) req.video = link;
     const raw = parseJSON(await aiAsk(req), "[") || [];
     const qs = raw.map(x => {
@@ -1348,7 +1350,7 @@ async function makeQuiz(L){
       return null; }).filter(Boolean);
     const mc = qs.filter(q => !q.type), short = qs.filter(q => q.type).slice(0, 1);
     if(mc.length < 3) return false;
-    L.questions = mc.slice(0, 6).concat(short);
+    L.questions = mc.slice(0, 6).concat(short); L.quizV = QUIZ_V;
     // Start the lesson fresh on the new questions (answers to the old recall prompts don't line up with them)
     const st = LS(L); if(st.view !== "summary"){ st.idx = 0; st.answers = []; st.view = "q"; delete st.order; delete st.up; }
     Object.keys(D.q).forEach(k => { if(k.startsWith(L.id + ":")) delete D.q[k]; });
@@ -1716,7 +1718,7 @@ function openStudy(L){
   $(".player-slot").hidden = !isVideo; $("#docSlot").hidden = isVideo;
   if(!isVideo){ if(P.playing) P.pause(); if(changed) mountDoc(L); }
   // Your own sources: write a real quiz the first time (the activity shows "Writing questions…" meanwhile)
-  if(L.custom && !L.questions && aiReady() && LS(L).view !== "summary") makeQuiz(L).then(ok => { if(cur === L){ if(ok) newQ(); render(); ui(); } });
+  if(needsQuiz(L) && aiReady() && LS(L).view !== "summary") makeQuiz(L).then(ok => { if(cur === L){ if(ok) newQ(); render(); ui(); } });
   setLessonText(); layout(); render(); ui(); if(changed && window.IntuishExtras) window.IntuishExtras.renderNotes();
   if(isVideo && (changed || !P.ready)) mountVideo();
   if(isVideo && !P.apiReady && !P.apiFailed && !loadApi.done){ loadApi.done = true; loadApi(); }
