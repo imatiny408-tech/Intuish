@@ -78,6 +78,8 @@ const richData = x => !!x && x.v === 1 && ((x.subjects || []).length || (x.custo
     if(richData(b)){ try { localStorage.setItem(KEY, json); } catch(e){} sessionStorage.setItem("intuish.restored", "1"); location.reload(); return; }
   }
   BACKUP.start();
+  // Ask the browser to never clear Intuish's storage on its own (granted automatically for Home Screen apps on iPad)
+  try { if(navigator.storage && navigator.storage.persist && !(await navigator.storage.persisted())) await navigator.storage.persist(); } catch(e){}
   if(sessionStorage.getItem("intuish.restored")){ sessionStorage.removeItem("intuish.restored"); setTimeout(() => toast("Your progress was restored from the backup copy"), 600); }
 })();
 
@@ -313,9 +315,40 @@ function renderPulse(){
   const go = el.querySelector(".pc-rem.is-due"); if(go){ go.onclick = () => { location.hash = "#/remember"; }; go.onkeydown = e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); go.click(); } }; }
 }
 
+/* ----- Backup files: the only copy that survives the iPad deleting the app's storage.
+   Home asks every few days (only when there's progress worth keeping) and saves through the share sheet, so it can go to iCloud Drive. ----- */
+const BK_EVERY = 3 * 864e5;
+function backupFile(){ return new File([JSON.stringify(Object.assign({}, D, {backupAt:now()}))], `intuish-backup-${new Date().toISOString().slice(0, 10)}.json`, {type:"application/json"}); }
+async function saveBackupFile(){
+  const f = backupFile();
+  try {
+    if(navigator.canShare && navigator.canShare({files:[f]})){ await navigator.share({files:[f], title:"Intuish backup"}); }
+    else { const a = document.createElement("a"); a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }
+    D.ui.lastBackup = now(); save(); toast("Backup saved"); return true;
+  } catch(e){ return false; }
+}
+async function restoreBackupFile(file, onBad){
+  let b = null; try { b = JSON.parse(await file.text()); } catch(e){}
+  if(!b || b.v !== 1){ onBad && onBad(); toast("That file isn’t an Intuish backup"); return; }
+  D = Object.assign(fresh(), b); delete D.backupAt; D.ui.lastBackup = now(); saveNow(); BACKUP.put(JSON.stringify(D));
+  sessionStorage.setItem("intuish.restored", "1"); setTimeout(() => location.reload(), 400);
+}
+function renderBackupBar(){
+  const bar = $("#bkBar"); if(!bar) return;
+  const rich = richData(D), due = rich && now() - (D.ui.lastBackup || 0) > BK_EVERY && now() > (D.ui.bkSnooze || 0);
+  const fresh1 = !rich && !sessionStorage.getItem("intuish.bkHide");
+  bar.hidden = !(due || fresh1);
+  if(bar.hidden) return;
+  $("#bkText").textContent = due ? (D.ui.lastBackup ? "Save a fresh backup of your progress to Files or iCloud Drive." : "Keep your progress safe: save a backup to Files or iCloud Drive.") : "Had progress on this device before? Restore it from a backup file.";
+  const go = $("#bkGo"); go.hidden = !due; go.textContent = "Save backup";
+  $("#bkRestoreL").hidden = due;
+  go.onclick = async () => { if(await saveBackupFile()) renderBackupBar(); };
+  $("#bkLater").onclick = () => { if(due){ D.ui.bkSnooze = now() + 864e5; save(); } else sessionStorage.setItem("intuish.bkHide", "1"); bar.hidden = true; };
+  $("#bkRestore").onchange = e => { const f = e.target.files[0]; if(f) restoreBackupFile(f); };
+}
 function renderHome(){
   const due = dueItems().length;
-  $("#remPill").hidden = true; $("#remCount").textContent = due; renderPulse();
+  $("#remPill").hidden = true; $("#remCount").textContent = due; renderPulse(); renderBackupBar();
   const rl = resumeLesson(), rb = $("#resumeBtn");
   if(rb){ const first = !rl && allLessons().find(l => l.subj === (mySubjects()[0] || {}).id), go = rl || first;
     rb.hidden = !go; if(go){ rb.href = `#/study/${go.id}`; rb.querySelector("span").textContent = rl ? "Resume lesson" : "Start studying"; rb.querySelector("b").textContent = go.title; rb.title = `${rl ? "Resume" : "Start"} ${go.title}`; } }
@@ -2086,11 +2119,8 @@ function openSettings(page){
     const b = e.target.closest("[data-sp]"); if(b) pickSubjectPhoto(b.dataset.sp, again);
   };
   if(q("#setNotes")) q("#setNotes").onclick = () => { w.remove(); openNotes(true); };
-  if(q("#setExport")) q("#setExport").onclick = () => {
-    const blob = new Blob([JSON.stringify(D)], {type:"application/json"}), a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = `intuish-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-    q("#bkNote").textContent = "Backup file saved. Keep it in Files, then use Restore from a file wherever you want your progress.";
+  if(q("#setExport")) q("#setExport").onclick = async () => {
+    if(await saveBackupFile()) q("#bkNote").textContent = "Backup saved. Choose “Save to Files” and iCloud Drive so it’s kept even if the iPad clears the app.";
   };
   if(q("#setImport")) q("#setImport").onchange = async e => {
     const f = e.target.files[0]; if(!f) return; let b = null;
@@ -2099,7 +2129,7 @@ function openSettings(page){
     const n = (b.subjects || []).length, c = sheet(`<div class="sheet-head"><h2>Restore this backup?</h2><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
       <p class="lead" style="margin:0">It replaces what’s here now with the backup${n ? ` (${n} of your own subject${n > 1 ? "s" : ""}, ${(b.notes || []).length} notes)` : ""}.</p>
       <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn outline" data-close data-focus>Cancel</button><button class="btn" id="doRestore">Restore</button></div>`);
-    c.querySelector("#doRestore").onclick = () => { D = Object.assign(fresh(), b); saveNow(); setTimeout(() => location.reload(), 300); };
+    c.querySelector("#doRestore").onclick = () => restoreBackupFile(f);
   };
   if(q("#setReset")) q("#setReset").onclick = () => {
     const c = sheet(`<div class="sheet-head"><h2>Erase all progress?</h2><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
