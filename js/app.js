@@ -42,12 +42,21 @@ if(!D || D.v !== 1) D = fresh();
 else if(!D.shown) D.shown = SUBJECTS.map(s => s.id);   // saves from before the one-starter-subject change keep every subject
 D = Object.assign(fresh(), D);
 let saveT = 0;
+setTimeout(() => { if(lastContent === null) lastContent = contentKey(); }, 0);
 function save(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 200); }
 let fullWarned = false;
-function saveNow(){
+// savedAt = when progress itself last changed. Layout, theme and sign-in bookkeeping don't count, so opening the app
+// on an old device never makes its copy look newer than the one saved online.
+const contentKey = () => JSON.stringify(D, (k, v) => (k === "ui" || k === "savedAt" || k === "session" || k === "timer" || k === "_lastSort") ? undefined : v);
+let lastContent = null;
+function saveNow(keepStamp){
+  const ck = contentKey();
+  if(lastContent === null) lastContent = ck;
+  if(ck !== lastContent){ lastContent = ck; if(!keepStamp) D.savedAt = now(); }
   const json = JSON.stringify(D);
   try { localStorage.setItem(KEY, json); } catch(e){ if(!fullWarned){ fullWarned = true; setTimeout(() => toast("This device’s storage for Intuish is full. Your work is kept in the backup copy."), 0); } }
   BACKUP.put(json);
+  if(typeof queueSync === "function") queueSync();
 }
 /* A second copy of everything in IndexedDB, so progress survives if the main storage is cleared or full.
    When the main copy is missing on start, the backup is restored automatically. */
@@ -1963,20 +1972,126 @@ async function sendLink(email){
   if(!AUTH) throw new Error("offline");
   const redirect = location.origin + location.pathname;
   const r = await fetch(`${AUTH.url}/auth/v1/otp?redirect_to=${encodeURIComponent(redirect)}`, {method:"POST", headers:{apikey:AUTH.anonKey, "Content-Type":"application/json"}, body:JSON.stringify({email, create_user:true})});
+  if(r.status === 429) throw new Error("wait");
   if(!r.ok) throw new Error("send");
+}
+const signedIn = () => !!(AUTH && D.profile.session && D.profile.session.refresh && D.profile.email);
+function setSession(j){
+  const old = D.profile.session || {};
+  D.profile.session = {access:j.access_token, refresh:j.refresh_token || old.refresh, exp:now() + (+j.expires_in || 3600) * 1000, uid:(j.user && j.user.id) || old.uid, first:old.first};
+  if(j.user && j.user.email) D.profile.email = j.user.email;
+  saveNow(true);
+}
+// The 6-digit code from the email (works inside the Home Screen app, where email links would open Safari instead)
+async function verifyCode(email, code){
+  for(const type of ["email", "magiclink", "signup"]){
+    const r = await fetch(`${AUTH.url}/auth/v1/verify`, {method:"POST", headers:{apikey:AUTH.anonKey, "Content-Type":"application/json"}, body:JSON.stringify({type, email, token:code})});
+    if(r.ok){ const j = await r.json(); D.profile.session = {first:true}; setSession(j); return; }
+  }
+  throw new Error("code");
+}
+async function freshToken(){
+  const s = D.profile.session; if(!s || !s.refresh) throw new Error("signed-out");
+  if(s.access && s.exp - now() > 60000) return s.access;
+  const r = await fetch(`${AUTH.url}/auth/v1/token?grant_type=refresh_token`, {method:"POST", headers:{apikey:AUTH.anonKey, "Content-Type":"application/json"}, body:JSON.stringify({refresh_token:s.refresh})});
+  if(r.status === 400 || r.status === 401){ D.profile.session = null; saveNow(true); throw new Error("signed-out"); }
+  if(!r.ok) throw new Error("net");
+  setSession(await r.json()); return D.profile.session.access;
+}
+async function api(path, opts){
+  const token = await freshToken();
+  return fetch(AUTH.url + path, Object.assign({}, opts, {headers:Object.assign({apikey:AUTH.anonKey, Authorization:`Bearer ${token}`, "Content-Type":"application/json"}, (opts || {}).headers)}));
+}
+/* ----- Online sync: everything except the AI key and sign-in tokens is kept in the person's own row,
+   so a deleted Home Screen app or a new device gets it all back after signing in ----- */
+const SYNC = {t:0, at:0, busy:false, state:"", remoteT:null}; // remoteT: change time of the copy online, once known
+const syncCopy = () => { const c = JSON.parse(JSON.stringify(D)); if(c.ui){ delete c.ui.aiKey; delete c.ui.aiModel; } c.profile = Object.assign({}, c.profile, {session:null}); c.timer = null; delete c._lastSort; return c; };
+function queueSync(){ if(!signedIn()) return; clearTimeout(SYNC.t); SYNC.t = setTimeout(pushSync, 4000); }
+// Both copies changed since the last sync: keep everything from both (notes, sources, subjects, answers)
+function mergeData(a, b){
+  const out = Object.assign({}, b, a);
+  const byId = (x, y) => { const m = new Map(); (y || []).forEach(o => o && m.set(o.id, o)); (x || []).forEach(o => o && m.set(o.id, Object.assign({}, m.get(o.id), o))); return [...m.values()]; };
+  out.notes = byId(a.notes, b.notes).sort((p, q) => (q.t || 0) - (p.t || 0));
+  out.custom = byId(a.custom, b.custom); out.subjects = byId(a.subjects, b.subjects); out.pending = byId(a.pending, b.pending);
+  out.shown = [...new Set([...(b.shown || []), ...(a.shown || [])])];
+  ["goals", "extraTopics", "goalTopics", "meta", "photos", "conn", "override"].forEach(k => out[k] = Object.assign({}, b[k], a[k]));
+  out.lessons = Object.assign({}, b.lessons); Object.entries(a.lessons || {}).forEach(([k, v]) => { const o = out.lessons[k];
+    if(!o || (v.opened || 0) > (o.opened || 0) || (!(v.opened || o.opened) && (v.answers || []).length >= (o.answers || []).length)) out.lessons[k] = v; });
+  out.q = Object.assign({}, b.q); Object.entries(a.q || {}).forEach(([k, v]) => { const o = out.q[k]; if(!o || (v.seen || 0) >= (o.seen || 0)) out.q[k] = v; });
+  const seen = new Set(); out.hist = [...(b.hist || []), ...(a.hist || [])].filter(h => { const k = JSON.stringify(h); if(seen.has(k)) return false; seen.add(k); return true; });
+  return out;
+}
+async function pushSync(){
+  if(!signedIn() || SYNC.busy) return;
+  if(SYNC.remoteT == null) return pullSync();          // never push before knowing what's online
+  if((D.savedAt || 0) <= SYNC.remoteT){ SYNC.at = now(); SYNC.state = "ok"; return; } // nothing new here
+  SYNC.busy = true; let t = D.savedAt;
+  try {
+    // Someone saved from another device since we last looked: fold their changes in before saving ours
+    const r0 = await api(`/rest/v1/progress?select=data,updated_at&user_id=eq.${D.profile.session.uid}`);
+    const row = r0.ok ? (await r0.json())[0] : null, rt = row ? Date.parse(row.updated_at) || 0 : 0;
+    if(row && row.data && rt > SYNC.remoteT + 1000){
+      const keep = {ui:D.ui, session:D.profile.session, email:D.profile.email};
+      D = Object.assign(fresh(), mergeData(syncCopy(), row.data));
+      D.ui = keep.ui; D.profile = Object.assign({name:"", photo:"", email:"", session:null}, D.profile, {session:keep.session, email:keep.email || D.profile.email}); D.notes = D.notes || [];
+      t = D.savedAt = now(); lastContent = contentKey(); saveNow(true);
+      if(!$("#homeView").hidden) renderHome(); if(cur) renderNotes();
+      toast("Added changes from your other device");
+    }
+    const r = await api("/rest/v1/progress?on_conflict=user_id", {method:"POST", headers:{Prefer:"resolution=merge-duplicates,return=minimal"},
+      body:JSON.stringify({user_id:D.profile.session.uid, data:syncCopy(), updated_at:new Date(D.savedAt || now()).toISOString()})});
+    if(!r.ok) throw new Error("push " + r.status);
+    SYNC.at = now(); SYNC.state = "ok"; SYNC.remoteT = t;
+  } catch(e){ SYNC.state = e.message === "signed-out" ? "out" : "err"; }
+  finally { SYNC.busy = false; }
+}
+function applyRemote(data, t){
+  const keep = {aiKey:D.ui.aiKey, aiModel:D.ui.aiModel, session:D.profile.session, email:D.profile.email};
+  D = Object.assign(fresh(), data);
+  D.ui = Object.assign({}, D.ui, {aiKey:keep.aiKey, aiModel:keep.aiModel});
+  D.profile = Object.assign({name:"", photo:"", email:"", session:null}, D.profile, {session:keep.session, email:keep.email || D.profile.email});
+  D.notes = D.notes || []; D.savedAt = t; saveNow(true);
+  sessionStorage.setItem("intuish.synced", "1"); location.reload();
+}
+async function pullSync(){
+  if(!signedIn() || SYNC.busy) return;
+  let row;
+  try {
+    const r = await api(`/rest/v1/progress?select=data,updated_at&user_id=eq.${D.profile.session.uid}`);
+    if(!r.ok) throw new Error("pull " + r.status);
+    row = (await r.json())[0];
+  } catch(e){ SYNC.state = e.message === "signed-out" ? "out" : "err"; return; }
+  const first = D.profile.session.first; if(first){ D.profile.session.first = false; saveNow(true); }
+  if(!row || !row.data){ SYNC.remoteT = 0; pushSync(); return; }
+  const rt = Date.parse(row.updated_at) || 0, lt = D.savedAt || 0; SYNC.remoteT = rt;
+  if(first && richData(row.data) && richData(D) && Math.abs(rt - lt) > 2000) return chooseCopy(row.data, rt);
+  if(rt > lt + 1000 || (!richData(D) && richData(row.data))) applyRemote(row.data, rt);
+  else if(lt > rt + 1000) pushSync();
+  else { SYNC.at = now(); SYNC.state = "ok"; }
+}
+// First sign-in on a device that already has its own progress: let the person pick which copy to keep
+function chooseCopy(data, rt){
+  const when = t => t ? new Date(t).toLocaleString([], {month:"short", day:"numeric", hour:"numeric", minute:"2-digit"}) : "unknown";
+  const c = sheet(`<div class="sheet-head"><h2>Which progress should we keep?</h2></div>
+    <p class="lead" style="margin:0">Your account already has saved progress (last saved ${when(rt)}), and this device has its own (last changed ${when(D.savedAt)}).</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="btn outline" id="keepHere">Keep this device’s</button><button class="btn" id="keepOnline" data-focus>Use my saved progress</button></div>`);
+  c.querySelector("#keepOnline").onclick = () => applyRemote(data, rt);
+  c.querySelector("#keepHere").onclick = () => { D.savedAt = now(); saveNow(); pushSync(); c.remove(); toast("This device’s progress is now saved online"); };
 }
 async function finishSignIn(){
   let raw; try { raw = sessionStorage.getItem("intuish.auth"); sessionStorage.removeItem("intuish.auth"); } catch(e){}
-  if(!raw || !AUTH) return;
-  const p = new URLSearchParams(raw), token = p.get("access_token"); if(!token) return;
-  try {
-    const r = await fetch(`${AUTH.url}/auth/v1/user`, {headers:{apikey:AUTH.anonKey, Authorization:`Bearer ${token}`}});
-    const u = await r.json();
-    D.profile.email = u.email || D.profile.email; D.profile.session = {access:token, refresh:p.get("refresh_token"), exp:now() + (+p.get("expires_in") || 3600) * 1000};
-    save(); renderAvatar(); toast(`Signed in as ${D.profile.email}`);
-  } catch(e){ toast("That sign-in link didn’t work. Try sending a new one."); }
+  if(sessionStorage.getItem("intuish.synced")){ sessionStorage.removeItem("intuish.synced"); setTimeout(() => toast("Your progress is synced"), 500); }
+  if(raw && AUTH){
+    const p = new URLSearchParams(raw), token = p.get("access_token");
+    if(token) try {
+      const r = await fetch(`${AUTH.url}/auth/v1/user`, {headers:{apikey:AUTH.anonKey, Authorization:`Bearer ${token}`}});
+      const u = await r.json(); D.profile.session = {first:true};
+      setSession({access_token:token, refresh_token:p.get("refresh_token"), expires_in:p.get("expires_in"), user:u});
+      renderAvatar(); toast(`Signed in as ${D.profile.email}`);
+    } catch(e){ toast("That sign-in link didn’t work. Use the code from the email instead."); }
+  }
+  pullSync();
 }
-
 /* ----- Profile icon ----- */
 // Photo, else the first letter of the user's name, else a plain person icon until they add a name
 const PERSON = '<svg class="av-person" width="58%" height="58%" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8.2" r="4.2"/><path d="M3.8 20.6c.9-4.1 4.2-6.6 8.2-6.6s7.3 2.5 8.2 6.6c.1.5-.3.9-.8.9H4.6c-.5 0-.9-.4-.8-.9z"/></svg>';
@@ -2031,10 +2146,13 @@ function openSettings(page){
         <div class="set-row"><button class="linkish" id="setPhoto2">${pr.photo ? "Change photo" : "Add a photo"}</button>${pr.photo ? `<button class="linkish" id="rmPhoto">Remove</button>` : ""}</div></div></div>`,
     photos: `      <p class="set-p">Tap a subject to choose your own photo for it.</p>
       <div class="sp-grid">${mySubjects().map(sb => `<div class="sp-item"><button class="sp-pick" data-sp="${sb.id}" aria-label="Change ${esc(sb.name)} photo"><span class="sp-art">${artFor(sb)}</span><span class="sp-cam" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span></button><div class="sp-name"><b>${esc(sb.name)}</b>${D.photos && D.photos[sb.id] ? `<button class="linkish" data-sp-reset="${sb.id}">Use original</button>` : ""}</div></div>`).join("")}</div>`,
-    account: `      ${signed ? `<p class="set-p">Signed in as <b>${esc(pr.email)}</b></p><div><button class="btn outline" id="signOut">Sign out</button></div>`
+    account: `      ${signed ? `<p class="set-p">Signed in as <b>${esc(pr.email)}</b>. Your progress, notes and photos are saved online and come back on any device where you sign in. Your AI key stays on this device.</p>
+        <p class="set-note" id="syncNote">${SYNC.state === "err" ? "Couldn’t reach the server just now. Changes are kept here and will sync when you’re back online." : SYNC.at ? `Synced ${new Date(SYNC.at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}.` : "Syncing…"}</p>
+        <div class="set-row"><button class="btn outline" id="syncNow">Sync now</button><button class="btn outline" id="signOut">Sign out</button></div>`
       : !AUTH ? `<p class="set-p"><b>Email sign-in isn’t working yet.</b> It’s coming in a future update. Your progress, notes and photos are saved on this device until then.</p>`
-      : `<p class="set-p">Sign up with your email. We’ll send a link to verify it, no password needed.</p>
-        <form id="signForm" class="set-inline"><input id="signEmail" type="email" required placeholder="you@example.com" value="${esc(pr.email)}" autocomplete="email"><button class="btn" type="submit">Send link</button></form>
+      : `<p class="set-p">Sign in with your email to save your progress online. No password: we email you a 6-digit code.</p>
+        <form id="signForm" class="set-inline"><input id="signEmail" type="email" required placeholder="you@example.com" value="${esc(pr.email)}" autocomplete="email"><button class="btn" type="submit">Send code</button></form>
+        <form id="codeForm" class="set-inline" hidden><input id="signCode" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="6-digit code" aria-label="Code from the email"><button class="btn" type="submit">Sign in</button></form>
         <p class="set-note" id="signNote"></p>`}`,
     fonts: page === "fonts" ? fontsPage() : "",
     ai: D.ui.aiKey && !aiEdit ? `      <div class="ai-done" role="status"><span class="ai-check" aria-hidden="true"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
@@ -2068,14 +2186,23 @@ function openSettings(page){
   const again = () => { w.remove(); openSettings(page); };
   if(q("#setPhoto")){ q("#setPhoto").onclick = () => pickPhoto(again); q("#setPhoto2").onclick = () => pickPhoto(again); }
   const rm = w.querySelector("#rmPhoto"); if(rm) rm.onclick = () => { D.profile.photo = ""; save(); renderAvatar(); again(); };
-  const so = w.querySelector("#signOut"); if(so) so.onclick = () => { D.profile.session = null; save(); toast("Signed out"); again(); };
+  const so = w.querySelector("#signOut"); if(so) so.onclick = async () => { await pushSync(); D.profile.session = null; saveNow(true); toast("Signed out. Your progress stays on this device too."); again(); };
+  const sn = w.querySelector("#syncNow"); if(sn) sn.onclick = async () => { sn.disabled = true; q("#syncNote").textContent = "Syncing…"; await pullSync(); if(SYNC.state !== "err") await pushSync(); again(); };
   const sf = w.querySelector("#signForm");
   if(sf) sf.onsubmit = async ev => {
     ev.preventDefault();
     const email = w.querySelector("#signEmail").value.trim(), note = w.querySelector("#signNote");
-    D.profile.email = email; save();
-    try { await sendLink(email); note.textContent = `Check ${email} for a link to finish signing up.`; }
-    catch(e){ note.textContent = e.message === "offline" ? "Email sign-in is coming soon, so no link was sent yet. We saved your email on this device." : "The link couldn’t be sent. Check the email and try again."; }
+    D.profile.email = email; save(); note.textContent = "Sending…";
+    try { await sendLink(email); note.textContent = `We emailed a code to ${email}. Type it here (check spam if it isn’t there).`; q("#codeForm").hidden = false; setTimeout(() => q("#signCode").focus(), 50); }
+    catch(e){ note.textContent = e.message === "offline" ? "Email sign-in is coming soon, so no code was sent yet." : e.message === "wait" ? "A code was sent a moment ago. Wait a minute before asking for another." : "The code couldn’t be sent. Check the email and try again."; }
+  };
+  const cf = w.querySelector("#codeForm");
+  if(cf) cf.onsubmit = async ev => {
+    ev.preventDefault();
+    const code = q("#signCode").value.replace(/\s/g, ""), note = q("#signNote"); if(!code) return;
+    note.textContent = "Checking…";
+    try { await verifyCode(D.profile.email, code); renderAvatar(); toast(`Signed in as ${D.profile.email}`); w.remove(); pullSync(); }
+    catch(e){ note.textContent = "That code didn’t work. Check it, or send a new one."; }
   };
   if(q("#aiForm")) q("#aiForm").onsubmit = async ev => {
     ev.preventDefault();
@@ -2463,8 +2590,9 @@ $("#notes").addEventListener("click", noteClicks);
 $("#avatarBtn").onclick = e => {
   e.stopPropagation();
   const signed = !!(D.profile.session && D.profile.email);
-  menu($("#avatarBtn"), [["settings","Settings"],["notes","Notes", D.notes.length ? String(D.notes.length) : ""], !signed && AUTH && ["signup","Sign up with email"], "hr", ["about","About Intuish"]].filter(Boolean), a => {
-    if(a === "settings" || a === "signup") openSettings();
+  menu($("#avatarBtn"), [["settings","Settings"],["notes","Notes", D.notes.length ? String(D.notes.length) : ""], !signed && AUTH && ["signup","Sign in to sync"], "hr", ["about","About Intuish"]].filter(Boolean), a => {
+    if(a === "settings") openSettings();
+    if(a === "signup") openSettings("account");
     if(a === "notes") openNotes();
     if(a === "about") sheet(`<div class="sheet-head"><div><div class="eyebrow">Intuish</div><h2>Test version</h2></div><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
       <p class="lead" style="margin:0">Your progress is saved in this browser only. Each subject comes with a starter pack, and you can add up to 50 YouTube videos, 25 websites and 25 PDFs of your own. PDFs stay on this device.</p>
@@ -2475,7 +2603,8 @@ window.IntuishFsNoteOff = () => { if(!fsNote.hidden) toggleFsNote(false); };
 window.IntuishExtras = {renderAvatar, renderNotes, openNotes, openSettings};
 renderAvatar(); renderNotes(); finishSignIn();
 setTimeout(checkPending, 3000); window.addEventListener("online", checkPending);
-document.addEventListener("visibilitychange", () => { if(document.visibilityState === "visible") checkPending(); });
+document.addEventListener("visibilitychange", () => { if(document.visibilityState === "visible"){ checkPending(); pullSync(); } else if(signedIn()){ clearTimeout(SYNC.t); pushSync(); } });
+window.addEventListener("online", () => { pullSync(); });
 
 route();
 })();
