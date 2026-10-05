@@ -145,6 +145,25 @@
 </div>
 </div>
 
+<script>
+/* If Intuish fails to start, say so and let the person save their progress, instead of showing an empty app */
+window.__boot = Date.now();
+addEventListener("error", function(e){
+  if(Date.now() - window.__boot > 10000 || document.getElementById("bootErr")) return;
+  if(e.filename && e.filename.indexOf(location.origin) !== 0) return;
+  var d = document.createElement("div"); d.id = "bootErr";
+  d.style.cssText = "position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;background:#fff;color:#111;border:1px solid #ddd;border-radius:16px;padding:14px 16px;font:15px -apple-system,system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.15)";
+  d.innerHTML = '<b>Intuish had trouble starting.</b> Your saved progress is still on this device, so please don\'t delete the app. <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button id="bootSave" style="height:36px;padding:0 14px;border-radius:999px;border:0;background:#0C68DA;color:#fff;font:inherit">Save a copy of my progress</button><button onclick="location.reload()" style="height:36px;padding:0 14px;border-radius:999px;border:1px solid #ccc;background:#fff;font:inherit">Try again</button></div><div id="bootMsg" style="font-size:12px;color:#777;margin-top:8px"></div>';
+  (document.body || document.documentElement).appendChild(d);
+  document.getElementById("bootMsg").textContent = String(e.message || "");
+  document.getElementById("bootSave").onclick = function(){
+    var t = ""; try { t = localStorage.getItem("studyhub.v1") || ""; } catch(x){}
+    var f = new File([t || "{}"], "intuish-backup.json", {type:"application/json"});
+    if(navigator.canShare && navigator.canShare({files:[f]})) navigator.share({files:[f]}).catch(function(){});
+    else { var a = document.createElement("a"); a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); }
+  };
+});
+</script>
 <script src="js/art.js"></script>
 <script src="js/content.js"></script>
 <script src="js/content2.js"></script>

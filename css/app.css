@@ -628,3 +628,8 @@ html,body{overscroll-behavior:none}
 .bk-bar span{flex:1 1 220px;min-width:0}
 .bk-bar .act{height:36px;padding:0 16px}
 .bk-bar label.linkish{cursor:pointer}
+.rec-list{display:flex;flex-direction:column;gap:8px}
+.rec-row{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:14px}
+.rec-row span{flex:1;min-width:0;display:flex;flex-direction:column}
+.rec-row small{color:var(--muted);font-size:13px}
+.rec-row .btn{height:34px;padding:0 14px}
